@@ -1697,18 +1697,19 @@ class Instaloader:
         """
         if filename is None:
             # Generate filename from target, removing special characters
-            safe_target = target.replace(":", "").replace("#", "hashtag_").replace("%", "location_").replace("@", "followees_")
+            safe_target = (target.replace(":", "").replace("#", "hashtag_")
+                           .replace("%", "location_").replace("@", "followees_"))
             filename = f"{safe_target}_urls.txt"
-        
+
         self.context.log(f"Retrieving {target} post URLs...")
-        
+
         urls = []
         count = 0
-        
+
         for post in posts:
             if max_count is not None and count >= max_count:
                 break
-                
+
             if post_filter is not None:
                 try:
                     if not post_filter(post):
@@ -1716,15 +1717,15 @@ class Instaloader:
                 except (InstaloaderException, KeyError, TypeError) as err:
                     self.context.error("Post skipped. Filter evaluation failed: {}".format(err))
                     continue
-            
+
             url = f"https://www.instagram.com/p/{post.shortcode}/"
             urls.append(url)
             count += 1
             self.context.log(f"[{count}] {url}")
-        
+
         # Write URLs to file
         with open(filename, 'w', encoding='utf-8') as f:
             for url in urls:
                 f.write(url + '\n')
-        
+
         self.context.log(f"Saved {len(urls)} post URLs to {filename}")
