@@ -14,3 +14,5 @@
 Independent review and GitHub CI results are recorded after execution.
 
 After fixes: PyLint 10.00/10; MyPy clean; all seven offline tests pass; git diff --check clean.
+
+Package archive check found that tracked build/lib files produced a wheel with six stale modules (including __init__, CLI, Instaloader, context, iterator, and structures). Remove generated build/ and egg-info from version control and ignore future output; rebuild and compare every wheel module against source. This is a necessary sync compatibility fix.

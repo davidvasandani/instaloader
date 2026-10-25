@@ -1,2 +1,8 @@
 __pycache__/
 .mypy_cache/
+
+# Generated packaging output must not shadow source modules.
+build/
+dist/
+*.egg-info/
+.venv/
