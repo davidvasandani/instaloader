@@ -86,6 +86,24 @@ class UpstreamRegressionTests(unittest.TestCase):
                 with self.assertRaises(ConnectionException):
                     context.get_page_data('example/')
 
+    def test_missing_web_video_url_uses_iphone_candidate(self):
+        for web_versions in (None, []):
+            with self.subTest(web_versions=web_versions):
+                context = Mock()
+                context.is_logged_in = True
+                context.iphone_support = True
+                media = {'media_type': 2, 'code': 'ABC', 'pk': '123', 'taken_at': 1,
+                         'user': {'pk': '1'}, 'play_count': 1, 'video_versions': web_versions}
+                context.doc_id_graphql_query.return_value = {'data': {
+                    'xdt_api__v1__media__shortcode__web_info': {'items': [media]}}}
+                context.get_iphone_json.return_value = {'items': [
+                    {'video_versions': [{'url': 'https://example.com/video.mp4'}]}]}
+                post = Post.from_shortcode(context, 'ABC')
+                self.assertEqual(post.video_url, 'https://example.com/video.mp4')
+                context.head.assert_not_called()
+                context.iphone_support = False
+                self.assertIsNone(post.video_url)
+
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             with self.subTest(failure=failure), closing(InstaloaderContext(sleep=False, quiet=True)) as context:
