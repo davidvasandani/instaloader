@@ -1,5 +1,19 @@
 # Implementation plan
 
+1. Complete SpecKit constitution, specification, clarification, technical plan, tasks, and analysis in order.
+2. Register and attach Instaloader to this Vibe Kanban workspace, using master as the PR base.
+3. Create the workspace topic branch from fork c69eff0dbbcdb3691964af1893c4576eeb9efe5f and merge upstream 09dea80d2be81bed94e8d65717cf8684fcc2998b, preserving the fork's --list-only feature.
+4. Inspect conflicts and the full upstream diff. Run CI-equivalent checks and offline regression checks for --list-only; do not require Instagram credentials.
+5. Run independent Codex CLI review, fix confirmed findings, and repeat validation as necessary.
+6. Record reusable sync knowledge and verification evidence; commit all task artifacts.
+7. Use Vibe Kanban Create PR against master, wait for passing CI, merge with history preserved, and verify upstream ancestry on the resulting master.
+
+---
+
+# 15lovecoffee archive task (527c)
+
+# Implementation plan
+
 1. Complete the workspace-provided SpecKit commands in their required order; their feature artifacts live in homelab/specs/vk/527c-download-15lovec.
 2. Inspect the checked-out Instaloader CLI, dependencies and local session availability without exposing secrets.
 3. Run a bounded public download for 15lovecoffee into ../archives/15lovecoffee. Include reels, tagged and IGTV where available; preserve normal post captions and metadata. If an authorized Instaloader session is available, include stories and highlights.
