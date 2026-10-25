@@ -593,8 +593,14 @@ class Post:
                             display_url = re.sub(r'([?&])se=\d+&?', r'\1', orig_url).rstrip('&')
                         except (InstaloaderException, KeyError, IndexError) as err:
                             self._context.error(f"Unable to fetch high quality image version of {self}: {err}")
-                    yield PostSidecarNode(is_video=is_video, display_url=display_url,
-                                          video_url=node['video_url'] if is_video else None)
+                    video_url = node.get('video_url') if is_video else None
+                    if is_video and not video_url and self._context.iphone_support and self._context.is_logged_in:
+                        try:
+                            versions = self._iphone_struct['carousel_media'][idx].get('video_versions') or []
+                            video_url = next((version['url'] for version in versions if version.get('url')), None)
+                        except (InstaloaderException, KeyError, IndexError) as err:
+                            self._context.error(f"Unable to fetch carousel video version of {self}: {err}")
+                    yield PostSidecarNode(is_video=is_video, display_url=display_url, video_url=video_url)
 
     @property
     def caption(self) -> Optional[str]:

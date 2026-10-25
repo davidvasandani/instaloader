@@ -67,7 +67,8 @@ class UpstreamRegressionTests(unittest.TestCase):
                 response.reason = 'test response'
                 response._content = b''
                 with patch('requests.sessions.Session.request', return_value=response), \
-                        patch.object(context._rate_controller, 'wait_before_query'):
+                        patch.object(context._rate_controller, 'wait_before_query'), \
+                    patch.object(context._rate_controller, 'handle_429'):
                     with self.assertRaises(AbortDownloadException):
                         context.get_page_data('example/')
                     context._session.cookies.clear()
@@ -82,7 +83,8 @@ class UpstreamRegressionTests(unittest.TestCase):
             response.reason = 'Too Many Requests'
             response._content = b''
             with patch('requests.sessions.Session.request', return_value=response), \
-                    patch.object(context._rate_controller, 'wait_before_query'):
+                    patch.object(context._rate_controller, 'wait_before_query'), \
+                    patch.object(context._rate_controller, 'handle_429'):
                 with self.assertRaises(ConnectionException):
                     context.get_page_data('example/')
 
@@ -103,6 +105,65 @@ class UpstreamRegressionTests(unittest.TestCase):
                 context.head.assert_not_called()
                 context.iphone_support = False
                 self.assertIsNone(post.video_url)
+
+    def test_carousel_video_uses_iphone_fallback(self):
+        for versions in (None, []):
+            with self.subTest(versions=versions):
+                context = Mock()
+                context.is_logged_in = True
+                context.iphone_support = True
+                child = {'media_type': 2, 'video_versions': versions,
+                         'image_versions2': {'candidates': [{'url': 'https://example.com/thumb.jpg'}]}}
+                media = {'media_type': 8, 'code': 'ABC', 'pk': '123', 'taken_at': 1,
+                         'user': {'pk': '1'}, 'carousel_media': [child]}
+                context.doc_id_graphql_query.return_value = {'data': {
+                    'xdt_api__v1__media__shortcode__web_info': {'items': [media]}}}
+                context.get_iphone_json.return_value = {'items': [{'carousel_media': [
+                    {'video_versions': [{'url': 'https://example.com/video.mp4'}]}]}]}
+                post = Post.from_shortcode(context, 'ABC')
+                self.assertEqual(list(post.get_sidecar_nodes())[0].video_url, 'https://example.com/video.mp4')
+                context.get_iphone_json.assert_called_once()
+                context.iphone_support = False
+                self.assertIsNone(list(post.get_sidecar_nodes())[0].video_url)
+
+    @staticmethod
+    def response(status):
+        response = requests.Response()
+        response.status_code = status
+        response.reason = 'test response'
+        response._content = b'<script type="application/json">{"__bbox":{"result":{"data":{"ok":true}}}}</script>'
+        return response
+
+    def test_page_retries_transient_failures_and_backs_off_on_429(self):
+        for failure in (requests.exceptions.Timeout('offline'), self.response(503), self.response(429)):
+            with self.subTest(failure=failure), closing(InstaloaderContext(
+                    sleep=False, quiet=True, max_connection_attempts=3)) as context:
+                with patch('requests.sessions.Session.request', side_effect=[failure, self.response(200)]) as request, \
+                        patch.object(context._rate_controller, 'wait_before_query'), \
+                        patch.object(context._rate_controller, 'handle_429') as backoff, \
+                        patch.object(context, 'error'):
+                    self.assertEqual(context.get_page_data('example/'), [{'ok': True}])
+                self.assertEqual(request.call_count, 2)
+                if isinstance(failure, requests.Response) and failure.status_code == 429:
+                    backoff.assert_called_once_with('other')
+                else:
+                    backoff.assert_not_called()
+
+    def test_page_retry_limit_and_unlimited_retry_setting(self):
+        for limit in (0, 2):
+            with self.subTest(limit=limit), closing(InstaloaderContext(
+                    sleep=False, quiet=True, max_connection_attempts=limit)) as context:
+                with patch('requests.sessions.Session.request',
+                           side_effect=[self.response(503), self.response(503), self.response(200)]) as request, \
+                        patch.object(context._rate_controller, 'wait_before_query'), \
+                        patch.object(context, 'error'):
+                    if limit:
+                        with self.assertRaises(ConnectionException):
+                            context.get_page_data('example/')
+                        self.assertEqual(request.call_count, 2)
+                    else:
+                        self.assertEqual(context.get_page_data('example/'), [{'ok': True}])
+                        self.assertEqual(request.call_count, 3)
 
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):

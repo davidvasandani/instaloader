@@ -561,17 +561,7 @@ class InstaloaderContext:
         csrf = next((c.value for c in self._session.cookies
                      if c.name == 'csrftoken' and c.value), None)
         if not csrf:
-            try:
-                resp = self._session.get('https://www.instagram.com/', timeout=self.request_timeout,
-                                         allow_redirects=False)
-            except requests.exceptions.RequestException as err:
-                raise ConnectionException(
-                    "CSRF initialization request to https://www.instagram.com/: {}".format(err)
-                ) from err
-            if resp.status_code in self.fatal_status_codes:
-                raise AbortDownloadException(self._response_error(resp))
-            if resp.status_code != 200:
-                raise ConnectionException(self._response_error(resp))
+            self._get_page_response(self._session, 'https://www.instagram.com/')
             csrf = next((c.value for c in self._session.cookies
                          if c.name == 'csrftoken' and c.value), '')
 
@@ -698,6 +688,38 @@ class InstaloaderContext:
 
             return response
 
+    def _get_page_response(self, session: requests.Session, url: str,
+                           headers: Optional[Dict[str, str]] = None) -> requests.Response:
+        """Fetch HTML with the same retry, backoff, and abort policy as JSON queries."""
+        attempt = 1
+        while True:
+            try:
+                self.do_sleep()
+                self._rate_controller.wait_before_query('other')
+                resp = session.get(url, headers=headers, timeout=self.request_timeout, allow_redirects=False)
+                if resp.status_code in self.fatal_status_codes:
+                    raise AbortDownloadException(self._response_error(resp))
+                if resp.status_code == 404:
+                    raise QueryReturnedNotFoundException(self._response_error(resp))
+                if resp.status_code == 429:
+                    raise TooManyRequestsException(self._response_error(resp))
+                if resp.status_code != 200:
+                    raise ConnectionException(self._response_error(resp))
+                return resp
+            except (ConnectionException, requests.exceptions.RequestException) as err:
+                error_string = "Page request to {}: {}".format(url, err)
+                if attempt == self.max_connection_attempts:
+                    if isinstance(err, QueryReturnedNotFoundException):
+                        raise QueryReturnedNotFoundException(error_string) from err
+                    raise ConnectionException(error_string) from err
+                self.error(error_string + " [retrying; skip with ^C]", repeat_at_end=False)
+                try:
+                    if isinstance(err, TooManyRequestsException):
+                        self._rate_controller.handle_429('other')
+                except KeyboardInterrupt:
+                    raise ConnectionException(error_string) from err
+                attempt += 1
+
     def get_page_data(self, path: str) -> List[Dict[str, Any]]:
         """Load a page of ``www.instagram.com`` as a logged-out visitor and return the data it embeds.
 
@@ -709,23 +731,12 @@ class InstaloaderContext:
         :raises QueryReturnedNotFoundException: When the server responds with a 404.
         :raises ConnectionException: When the request failed.
         """
-        self.do_sleep()
-        self._rate_controller.wait_before_query('other')
         url = 'https://www.instagram.com/{0}'.format(path)
         # Instagram only embeds the data when the request looks like a browser's page navigation.
         headers = {'Accept': 'text/html', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate',
                    'Sec-Fetch-Site': 'none'}
-        try:
-            with self.get_anonymous_session() as anonymous_session:
-                resp = anonymous_session.get(url, headers=headers, allow_redirects=False)
-        except requests.exceptions.RequestException as err:
-            raise ConnectionException("Page request to {}: {}".format(url, err)) from err
-        if resp.status_code in self.fatal_status_codes:
-            raise AbortDownloadException(self._response_error(resp))
-        if resp.status_code == 404:
-            raise QueryReturnedNotFoundException(self._response_error(resp))
-        if resp.status_code != 200:
-            raise ConnectionException(self._response_error(resp))
+        with self.get_anonymous_session() as anonymous_session:
+            resp = self._get_page_response(anonymous_session, url, headers)
         data: List[Dict[str, Any]] = []
         for script in re.finditer(r'<script type="application/json"[^>]*>(.*?)</script>', resp.text, re.DOTALL):
             with suppress(json.decoder.JSONDecodeError):
