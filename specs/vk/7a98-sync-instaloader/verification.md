@@ -24,3 +24,5 @@ After removing generated packaging files, an archive wheel build passed and ever
 Second Codex review reproduced a P2 geotag failure: the new web-info response uses location.pk while Post.location expects location.id. Normalize a copied nested location dictionary, retaining an existing id and avoiding mutation of input. Regression coverage exercises pk-only, id-only, and both identifiers through Post.from_shortcode and Post.location.
 
 Third review reproduced a P2 liker-ID mismatch: the new endpoint returns pk, causing Profile.userid and set operations to fetch each profile again. Copy pk to a missing id while preserving the source dictionary. A regression test confirms both pk and id inputs support set collection and ID reads without extra GraphQL requests.
+
+Fourth review reproduced a P2 --abort-on regression in the new page-fetch path. Check fatal_status_codes before recoverable HTTP handling. The same guard now covers CSRF initialization (without following redirects), whose non-success responses become ConnectionException. Offline tests exercise fatal 302/404/429 in both paths and a recoverable nonfatal response.

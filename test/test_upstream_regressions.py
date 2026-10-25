@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import requests
-from instaloader import ConnectionException, InstaloaderContext, Post
+from instaloader import AbortDownloadException, ConnectionException, InstaloaderContext, Post
 
 
 class UpstreamRegressionTests(unittest.TestCase):
@@ -57,6 +57,34 @@ class UpstreamRegressionTests(unittest.TestCase):
         context.get_json.assert_called_once_with('api/v1/media/123/likers/', {})
         context.doc_id_graphql_query.assert_not_called()
         self.assertNotIn('id', users[0])
+
+    def test_page_and_csrf_requests_honor_fatal_status_codes(self):
+        for status in (302, 404, 429):
+            with self.subTest(status=status), closing(InstaloaderContext(
+                    sleep=False, quiet=True, fatal_status_codes=[status])) as context:
+                response = requests.Response()
+                response.status_code = status
+                response.reason = 'test response'
+                response._content = b''
+                with patch('requests.sessions.Session.request', return_value=response), \
+                        patch.object(context._rate_controller, 'wait_before_query'):
+                    with self.assertRaises(AbortDownloadException):
+                        context.get_page_data('example/')
+                    context._session.cookies.clear()
+                    with patch.object(context._session, 'get', return_value=response), \
+                            self.assertRaises(AbortDownloadException):
+                        context.doc_id_graphql_query('123', {})
+
+    def test_page_nonfatal_failure_is_recoverable(self):
+        with closing(InstaloaderContext(sleep=False, quiet=True)) as context:
+            response = requests.Response()
+            response.status_code = 429
+            response.reason = 'Too Many Requests'
+            response._content = b''
+            with patch('requests.sessions.Session.request', return_value=response), \
+                    patch.object(context._rate_controller, 'wait_before_query'):
+                with self.assertRaises(ConnectionException):
+                    context.get_page_data('example/')
 
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):

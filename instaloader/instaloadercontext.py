@@ -562,11 +562,16 @@ class InstaloaderContext:
                      if c.name == 'csrftoken' and c.value), None)
         if not csrf:
             try:
-                self._session.get('https://www.instagram.com/', timeout=self.request_timeout)
+                resp = self._session.get('https://www.instagram.com/', timeout=self.request_timeout,
+                                         allow_redirects=False)
             except requests.exceptions.RequestException as err:
                 raise ConnectionException(
                     "CSRF initialization request to https://www.instagram.com/: {}".format(err)
                 ) from err
+            if resp.status_code in self.fatal_status_codes:
+                raise AbortDownloadException(self._response_error(resp))
+            if resp.status_code != 200:
+                raise ConnectionException(self._response_error(resp))
             csrf = next((c.value for c in self._session.cookies
                          if c.name == 'csrftoken' and c.value), '')
 
@@ -715,6 +720,8 @@ class InstaloaderContext:
                 resp = anonymous_session.get(url, headers=headers, allow_redirects=False)
         except requests.exceptions.RequestException as err:
             raise ConnectionException("Page request to {}: {}".format(url, err)) from err
+        if resp.status_code in self.fatal_status_codes:
+            raise AbortDownloadException(self._response_error(resp))
         if resp.status_code == 404:
             raise QueryReturnedNotFoundException(self._response_error(resp))
         if resp.status_code != 200:

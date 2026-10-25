@@ -17,12 +17,12 @@ class ListOnlyTests(unittest.TestCase):
         previous = os.getcwd()
         os.chdir(self.directory.name)
         self.addCleanup(os.chdir, previous)
-        self.loader = Instaloader(quiet=True)
-        self.addCleanup(self.loader.close)
         # Any unexpected network request or download fails the test.
         self.network = patch('requests.sessions.Session.request',
                              side_effect=AssertionError('Unexpected network request')).start()
         self.addCleanup(patch.stopall)
+        self.loader = Instaloader(quiet=True)
+        self.addCleanup(self.loader.close)
         self.download = patch.object(self.loader, 'download_post',
                                      side_effect=AssertionError('Unexpected download')).start()
 
