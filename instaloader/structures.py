@@ -317,7 +317,8 @@ class Post:
                 context, media["user"]["pk"], media["code"]
             )
         caption = media.get("caption")
-        caption_text = caption.get("text") if isinstance(caption, dict) else None
+        caption_text = caption.get("text") if isinstance(caption, dict) else caption
+        pic_json["caption"] = caption_text
         pic_json["edge_media_to_caption"] = (
             {"edges": [{"node": {"text": caption_text}}]} if caption_text is not None
             else {"edges": []}

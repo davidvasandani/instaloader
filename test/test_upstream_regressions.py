@@ -190,6 +190,22 @@ class UpstreamRegressionTests(unittest.TestCase):
                     with self.assertRaises(ConnectionException if retry else KeyboardInterrupt):
                         context.get_page_data('example/')
 
+    def test_caption_normalization_handles_absent_and_present_text(self):
+        for caption, expected in ((None, None), ({}, None), ({'text': None}, None),
+                                  ({'text': ''}, ''), ({'text': '#hello @world'}, '#hello @world'),
+                                  ('legacy text', 'legacy text')):
+            with self.subTest(caption=caption):
+                context = Mock()
+                media = {'media_type': 1, 'code': 'ABC', 'pk': '123', 'taken_at': 1,
+                         'user': {'pk': '1'}, 'caption': caption}
+                context.doc_id_graphql_query.return_value = {'data': {
+                    'xdt_api__v1__media__shortcode__web_info': {'items': [media]}}}
+                post = Post.from_shortcode(context, 'ABC')
+                self.assertEqual(post.caption, expected)
+                self.assertEqual(post.caption_hashtags, ['hello'] if expected == '#hello @world' else [])
+                self.assertEqual(post.caption_mentions, ['world'] if expected == '#hello @world' else [])
+                self.assertEqual(media['caption'], caption)
+
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             with self.subTest(failure=failure), closing(InstaloaderContext(sleep=False, quiet=True)) as context:
