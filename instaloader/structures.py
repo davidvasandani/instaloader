@@ -259,6 +259,100 @@ class Post:
         return fake_node
 
     @staticmethod
+    def _fetch_play_count_from_clips(context: 'InstaloaderContext', user_id: str,
+                                     shortcode: str) -> Optional[int]:
+        """Fetch play_count for a reel via the clips connection endpoint as a fallback."""
+        try:
+            resp = context.doc_id_graphql_query(
+                "27234427476213202",
+                {"data": {"include_feed_video": True, "page_size": 12,
+                           "target_user_id": str(user_id)}},
+            )
+            edges = ((resp.get("data") or {})
+                     .get("xdt_api__v1__clips__user__connection_v2") or {})
+            for edge in edges.get("edges") or []:
+                media = (edge.get("node") or {}).get("media") or {}
+                if media.get("code") == shortcode:
+                    return media.get("play_count")
+        except (ConnectionException, BadResponseException):
+            pass
+        return None
+
+    @staticmethod
+    def _normalize_post_data(media: Dict[str, Any], context: 'InstaloaderContext') -> Dict[str, Any]:
+        """Normalize a Polaris media item to a legacy-compatible node, preserving the source structure."""
+        media_types = {1: "GraphImage", 2: "GraphVideo", 8: "GraphSidecar"}
+        media_type = media.get("media_type")
+        typename = None
+        if isinstance(media_type, int):
+            typename = media_types.get(media_type)
+        if not typename:
+            raise BadResponseException(f"Unknown media_type in metadata: {media_type}.")
+        pic_json: Dict[str, Any] = media.copy()
+        pic_json["shortcode"] = media["code"]
+        pic_json["id"] = media["pk"]
+        pic_json["__typename"] = typename
+        pic_json["is_video"] = media_type == 2
+        pic_json["taken_at_timestamp"] = media["taken_at"]
+        pic_json["owner"] = {
+            "id": media["user"]["pk"],
+            "username": media["user"].get("username", ""),
+            "full_name": media["user"].get("full_name", ""),
+        }
+        candidates = (media.get("image_versions2") or {}).get("candidates") or []
+        pic_json["display_url"] = candidates[0]["url"] if candidates else None
+        video_versions = media.get("video_versions") or []
+        pic_json["video_url"] = video_versions[0]["url"] if video_versions else None
+        pic_json["video_duration"] = media.get("video_duration")
+        pic_json["video_view_count"] = media.get("view_count")
+        pic_json["video_play_count"] = media.get("play_count")
+        if media_type == 2 and pic_json["video_view_count"] is None:
+            pic_json["video_play_count"] = Post._fetch_play_count_from_clips(
+                context, media["user"]["pk"], media["code"]
+            )
+        caption = media.get("caption")
+        caption_text = caption.get("text") if isinstance(caption, dict) else None
+        pic_json["edge_media_to_caption"] = (
+            {"edges": [{"node": {"text": caption_text}}]} if caption_text is not None
+            else {"edges": []}
+        )
+        pic_json["edge_media_preview_like"] = {"count": media.get("like_count") or 0}
+        pic_json["edge_media_to_parent_comment"] = {
+            "count": media.get("comment_count") or 0,
+            "edges": [],
+        }
+        if media.get("has_liked") is not None:
+            pic_json["viewer_has_liked"] = media["has_liked"]
+        carousel = media.get("carousel_media") or []
+        if carousel:
+            carousel_nodes = []
+            for item in carousel:
+                item_type = item.get("media_type", 1)
+                node: Dict[str, Any] = {
+                    "shortcode": item.get("code", ""),
+                    "__typename": media_types.get(item_type, "GraphImage"),
+                    "is_video": item_type == 2,
+                }
+                item_candidates = (item.get("image_versions2") or {}).get("candidates") or []
+                node["display_url"] = item_candidates[0]["url"] if item_candidates else ""
+                item_videos = item.get("video_versions") or []
+                node["video_url"] = item_videos[0]["url"] if item_videos else None
+                if item.get("accessibility_caption") is not None:
+                    node["accessibility_caption"] = item["accessibility_caption"]
+                carousel_nodes.append({"node": node})
+            pic_json["edge_sidecar_to_children"] = {"edges": carousel_nodes}
+        tagged = (media.get("usertags") or {}).get("in") or []
+        if tagged:
+            pic_json["edge_media_to_tagged_user"] = {
+                "edges": [
+                    {"node": {"user": {"username": t["user"]["username"].lower()}}}
+                    for t in tagged
+                    if (t.get("user") or {}).get("username")
+                ]
+            }
+        return pic_json
+
+    @staticmethod
     def shortcode_to_mediaid(code: str) -> int:
         if len(code) > 11:
             raise InvalidArgumentException("Wrong shortcode \"{0}\", unable to convert to mediaid.".format(code))
@@ -319,25 +413,18 @@ class Post:
 
     def _obtain_metadata(self):
         if not self._full_metadata_dict:
-            response = self._context.doc_id_graphql_query(
-                "8845758582119845", {"shortcode": self.shortcode}
+            resp = self._context.doc_id_graphql_query(
+                "27128499623469141",
+                {
+                    "shortcode": self.shortcode,
+                    "__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider": False,
+                },
             )
-            data = (response or {}).get("data")
-            pic_json = data.get("xdt_shortcode_media") if data else None
-            if pic_json is None:
+            web_info = (resp.get("data") or {}).get("xdt_api__v1__media__shortcode__web_info") or {}
+            items = web_info.get("items")
+            if not items:
                 raise BadResponseException("Fetching Post metadata failed.")
-            try:
-                xdt_types = {
-                    "XDTGraphImage": "GraphImage",
-                    "XDTGraphVideo": "GraphVideo",
-                    "XDTGraphSidecar": "GraphSidecar",
-                }
-                pic_json["__typename"] = xdt_types[pic_json["__typename"]]
-            except KeyError as exc:
-                raise BadResponseException(
-                    f"Unknown __typename in metadata: {pic_json['__typename']}."
-                ) from exc
-            self._full_metadata_dict = pic_json
+            self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
             if self.shortcode != self._full_metadata_dict['shortcode']:
                 self._node.update(self._full_metadata_dict)
                 raise PostChangedException
@@ -792,19 +879,9 @@ class Post:
         if self.likes == 0:
             # Avoid doing additional requests if there are no comments
             return
-        likes_edges = self._field('edge_media_preview_like', 'edges')
-        if self.likes == len(likes_edges):
-            # If the Post's metadata already contains all likes, don't do GraphQL requests to obtain them
-            yield from (Profile(self._context, like['node']) for like in likes_edges)
-            return
-        yield from NodeIterator(
-            self._context,
-            '1cb6ec562846122743b61e492c85999f',
-            lambda d: d['data']['shortcode_media']['edge_liked_by'],
-            lambda n: Profile(self._context, n),
-            {'shortcode': self.shortcode},
-            'https://www.instagram.com/p/{0}/'.format(self.shortcode),
-        )
+        data = self._context.get_json(f"api/v1/media/{self.mediaid}/likers/", {})
+        for user in data["users"]:
+            yield Profile(self._context, user)
 
     @property
     def is_sponsored(self) -> bool:
@@ -912,13 +989,30 @@ class Profile:
         :param username: Username
         :raises: :class:`ProfileNotExistsException`
         """
-        data = context.doc_id_graphql_query("26347858941511777", {"hasQuery": True, "query": username})["data"]
-        if data:
-            for user in data["xdt_api__v1__fbsearch__non_profiled_serp"]["users"]:
-                if user["username"].lower() == username.lower():
-                    return cls(context, user)
-
-        raise ProfileNotExistsException("Profile {} does not exist.".format(username))
+        # Resolve the profile through its public web page, which Instagram renders with the
+        # profile embedded. The web_profile_info endpoint previously used here is refused
+        # with HTTP 400 for some professional profiles, and with HTTP 401 or 429 for some
+        # sessions, both anonymously and when logged in.
+        try:
+            page = context.get_page_data("{0}/".format(username.lower()))
+        except QueryReturnedNotFoundException:
+            page = []
+        # The page embeds two queries for the profile: one for its details and one for its
+        # posts.
+        user: Dict[str, Any] = {}
+        for data in page:
+            user.update(data.get("xig_user_by_username") or {})
+        if not user.get("pk"):
+            raise ProfileNotExistsException("Profile {} does not exist.".format(username))
+        user.pop("polaris_ordered_timeline_connection", None)
+        # The page's "id" is not the user ID, which is "pk".
+        node = dict(user, id=user["pk"])
+        if context.is_logged_in:
+            # The page shows the profile as a logged-out visitor sees it. Leave the missing
+            # fields, notably the viewer's relationship to the profile, such as
+            # followed_by_viewer, to the GraphQL profile query in _obtain_metadata().
+            return cls(context, node)
+        return cls(context, cls._normalize_profile_data(node))
 
     @classmethod
     def from_id(cls, context: InstaloaderContext, profile_id: int):
@@ -931,15 +1025,16 @@ class Profile:
         """
         if profile_id in context.profile_id_cache:
             return context.profile_id_cache[profile_id]
-        data = context.graphql_query('7c16654f22c819fb63d1183034a5162f',
-                                     {'user_id': str(profile_id),
-                                      'include_chaining': False,
-                                      'include_reel': True,
-                                      'include_suggested_users': False,
-                                      'include_logged_out_extras': False,
-                                      'include_highlight_reels': False})['data']['user']
-        if data:
-            profile = cls(context, data['reel']['owner'])
+        # Resolve the current username from the user id, then load the full profile.
+        # The GraphQL user query previously used here started responding with HTTP 400.
+        try:
+            user = context.get_json(
+                "api/v1/users/{0}/info/".format(profile_id), params={}
+            ).get('user')
+        except QueryReturnedNotFoundException:
+            user = None
+        if user and user.get('username'):
+            profile = cls.from_username(context, user['username'])
         else:
             raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
                                             str(profile_id) + ").")
@@ -985,6 +1080,24 @@ class Profile:
     def _obtain_metadata(self):
         try:
             if not self._has_full_metadata:
+                if not self._context.is_logged_in:
+                    # Anonymous access: the web_profile_info endpoint returns the full
+                    # node in the legacy format and still works, unlike the GraphQL
+                    # profile query.
+                    try:
+                        data = self._context.get_json(
+                            "api/v1/users/web_profile_info/",
+                            params={"username": self.username},
+                        ).get('data')
+                    except QueryReturnedNotFoundException as err:
+                        raise ProfileNotExistsException(
+                            'Profile {} does not exist.'.format(self.username)) from err
+                    user_data = data.get('user') if data else None
+                    if user_data is None:
+                        raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username))
+                    self._node = user_data
+                    self._has_full_metadata = True
+                    return
                 user_id = self._node.get('id') or self._node.get('pk')
                 variables = {
                     "id": str(user_id),
@@ -1016,7 +1129,8 @@ class Profile:
                                                         ', '.join(similar_profiles[0:5]))) from err
             raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username)) from err
 
-    def _normalize_profile_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _normalize_profile_data(user_data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize PolarisProfilePageContentQuery response to match legacy format."""
         normalized = user_data.copy()
         if 'id' not in normalized and 'pk' in normalized:
@@ -1262,33 +1376,52 @@ class Profile:
 
         :rtype: NodeIterator[Post]"""
         self._obtain_metadata()
-        logged_in = self._context.is_logged_in
+        if not self._context.is_logged_in:
+            return NodeIterator(
+                context=self._context,
+                edge_extractor=lambda d: d["data"]["user"]["edge_owner_to_timeline_media"],
+                node_wrapper=lambda n: Post(self._context, n, self),
+                query_variables={
+                    "data": {
+                        "count": 12,
+                        "include_relationship_info": True,
+                        "latest_besties_reel_media": True,
+                        "latest_reel_media": True,
+                    },
+                    "id": self.userid,
+                },
+                query_referer="https://www.instagram.com/{0}/".format(self.username),
+                is_first=Profile._make_is_newest_checker(),
+                doc_id="7950326061742207",
+                query_hash=None,
+                first_data=self._metadata("edge_owner_to_timeline_media"),
+            )
         return NodeIterator(
             context=self._context,
-            edge_extractor=(
-                (lambda d: d["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"])
-                if logged_in
-                else (lambda d: d["data"]["user"]["edge_owner_to_timeline_media"])
-            ),
-            node_wrapper=(
-                (lambda n: Post.from_iphone_struct(self._context, n))
-                if logged_in
-                else (lambda n: Post(self._context, n, self))
-            ),
+            edge_extractor=lambda d: d["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"],
+            node_wrapper=lambda n: Post.from_iphone_struct(self._context, n),
+            # The query and variables that the web app sends for a profile's posts tab
+            # (PolarisProfilePostsTabContentQuery_connection). Instagram answers the
+            # previous query, 7898261790222653, with "execution error".
             query_variables={
                 "data": {
                     "count": 12,
+                    "include_reel_media_seen_timestamp": True,
                     "include_relationship_info": True,
                     "latest_besties_reel_media": True,
                     "latest_reel_media": True,
                 },
-                **({"username": self.username} if logged_in else {"id": self.userid}),
+                "first": 12,
+                "include_multi_captions": True,
+                "username": self.username,
+                "__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider": True,
+                "__relay_internal__pv__PolarisShortDramaEnabledrelayprovider": False,
+                "__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": False,
             },
             query_referer="https://www.instagram.com/{0}/".format(self.username),
             is_first=Profile._make_is_newest_checker(),
-            doc_id="7898261790222653" if logged_in else "7950326061742207",
+            doc_id="28975909992013618",
             query_hash=None,
-            first_data=(None if logged_in else self._metadata("edge_owner_to_timeline_media")),
         )
 
     def get_saved_posts(self) -> NodeIterator[Post]:
