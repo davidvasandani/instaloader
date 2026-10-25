@@ -15,6 +15,7 @@ from . import (AbortDownloadException, BadCredentialsException, Instaloader, Ins
 from .instaloader import (get_default_session_filename, get_default_stamps_filename)
 from .instaloadercontext import default_user_agent
 from .lateststamps import LatestStamps
+from .structures import Hashtag
 try:
     import browser_cookie3
     bc3_library = True
@@ -241,9 +242,8 @@ def _main(instaloader: Instaloader, targetlist: List[str],
                         profiles.add(followee)
                 elif re.match(r"^#\w+$", target):
                     if list_only:
-                        from .structures import Hashtag
                         hashtag = Hashtag.from_name(instaloader.context, target[1:])
-                        instaloader.list_posts_to_file(hashtag.get_posts_resumable(), target, 
+                        instaloader.list_posts_to_file(hashtag.get_posts_resumable(), target,
                                                       max_count=max_count, post_filter=post_filter)
                     else:
                         instaloader.download_hashtag(hashtag=target[1:], max_count=max_count, fast_update=fast_update,
@@ -256,7 +256,7 @@ def _main(instaloader: Instaloader, targetlist: List[str],
                                                   post_filter=post_filter)
                 elif target == ":feed":
                     if list_only:
-                        instaloader.list_posts_to_file(instaloader.get_feed_posts(), ":feed", 
+                        instaloader.list_posts_to_file(instaloader.get_feed_posts(), ":feed",
                                                       max_count=max_count, post_filter=post_filter)
                     else:
                         instaloader.download_feed_posts(fast_update=fast_update, max_count=max_count,
@@ -311,11 +311,11 @@ def _main(instaloader: Instaloader, targetlist: List[str],
         if instaloader.context.iphone_support and profiles and (download_profile_pic or download_posts) and \
            not instaloader.context.is_logged_in:
             instaloader.context.log("Hint: Login to download higher-quality versions of pictures.")
-        
+
         if list_only and profiles:
             # List URLs for each profile
             for profile in profiles:
-                instaloader.list_posts_to_file(profile.get_posts(), profile.username, 
+                instaloader.list_posts_to_file(profile.get_posts(), profile.username,
                                               max_count=max_count, post_filter=post_filter)
         else:
             instaloader.download_profiles(
