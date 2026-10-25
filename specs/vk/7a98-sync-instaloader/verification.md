@@ -20,3 +20,5 @@ Package archive check found that tracked build/lib files produced a wheel with s
 Independent Codex CLI review (against c69eff0) reproduced two P2 findings: valid play_count overwritten by a fallback, and raw requests exceptions escaping CSRF initialization. Fixed by retaining existing play counts (including zero) and translating initialization request failures to ConnectionException with the original cause. Added three offline test methods for preserved counts, missing-count fallback, and timeout/connection-error translation. All 10 tests pass; PyLint remains 10.00/10 and MyPy passes.
 
 After removing generated packaging files, an archive wheel build passed and every packaged Python module matched its source byte-for-byte.
+
+Second Codex review reproduced a P2 geotag failure: the new web-info response uses location.pk while Post.location expects location.id. Normalize a copied nested location dictionary, retaining an existing id and avoiding mutation of input. Regression coverage exercises pk-only, id-only, and both identifiers through Post.from_shortcode and Post.location.

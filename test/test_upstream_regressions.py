@@ -28,6 +28,23 @@ class UpstreamRegressionTests(unittest.TestCase):
         self.assertEqual(Post._normalize_post_data(media, context)['video_play_count'], 42)
         context.doc_id_graphql_query.assert_called_once()
 
+    def test_location_identifiers_are_compatible_with_geotags(self):
+        for identifier in ({'pk': '456'}, {'id': '456'}, {'id': '456', 'pk': '789'}):
+            with self.subTest(identifier=identifier):
+                context = Mock()
+                context.is_logged_in = True
+                location = dict(identifier, name='Place', slug='place', has_public_page=True,
+                                lat=1.0, lng=2.0)
+                media = {'media_type': 1, 'code': 'ABC', 'pk': '123', 'taken_at': 1,
+                         'user': {'pk': '1', 'username': 'owner'}, 'location': location}
+                context.doc_id_graphql_query.return_value = {'data': {
+                    'xdt_api__v1__media__shortcode__web_info': {'items': [media]}}}
+                post = Post.from_shortcode(context, 'ABC')
+                self.assertEqual(post.location.id, 456)
+                self.assertEqual((post.location.lat, post.location.lng), (1.0, 2.0))
+                self.assertEqual(set(location).intersection({'id', 'pk'}), set(identifier))
+                context.get_json.assert_not_called()
+
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             with self.subTest(failure=failure), closing(InstaloaderContext(sleep=False, quiet=True)) as context:

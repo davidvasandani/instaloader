@@ -299,6 +299,11 @@ class Post:
             "username": media["user"].get("username", ""),
             "full_name": media["user"].get("full_name", ""),
         }
+        location = media.get("location")
+        if isinstance(location, dict):
+            pic_json["location"] = location.copy()
+            if location.get("id") is None and "pk" in location:
+                pic_json["location"]["id"] = location["pk"]
         candidates = (media.get("image_versions2") or {}).get("candidates") or []
         pic_json["display_url"] = candidates[0]["url"] if candidates else None
         video_versions = media.get("video_versions") or []
