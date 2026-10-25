@@ -561,7 +561,12 @@ class InstaloaderContext:
         csrf = next((c.value for c in self._session.cookies
                      if c.name == 'csrftoken' and c.value), None)
         if not csrf:
-            self._session.get('https://www.instagram.com/', timeout=self.request_timeout)
+            try:
+                self._session.get('https://www.instagram.com/', timeout=self.request_timeout)
+            except requests.exceptions.RequestException as err:
+                raise ConnectionException(
+                    "CSRF initialization request to https://www.instagram.com/: {}".format(err)
+                ) from err
             csrf = next((c.value for c in self._session.cookies
                          if c.name == 'csrftoken' and c.value), '')
 
