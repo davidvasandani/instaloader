@@ -706,6 +706,11 @@ class InstaloaderContext:
                 if resp.status_code != 200:
                     raise ConnectionException(self._response_error(resp))
                 return resp
+            except KeyboardInterrupt as err:
+                if attempt == 1:
+                    raise
+                self.error("[skipped by user]", repeat_at_end=False)
+                raise ConnectionException("Page request to {} interrupted during retry".format(url)) from err
             except (ConnectionException, requests.exceptions.RequestException) as err:
                 error_string = "Page request to {}: {}".format(url, err)
                 if attempt == self.max_connection_attempts:

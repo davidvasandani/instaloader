@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 import requests
-from instaloader import AbortDownloadException, ConnectionException, InstaloaderContext, Post
+from instaloader import (AbortDownloadException, ConnectionException, InstaloaderContext,
+                        LoginRequiredException, Post, QueryReturnedBadRequestException)
 
 
 class UpstreamRegressionTests(unittest.TestCase):
@@ -164,6 +165,30 @@ class UpstreamRegressionTests(unittest.TestCase):
                     else:
                         self.assertEqual(context.get_page_data('example/'), [{'ok': True}])
                         self.assertEqual(request.call_count, 3)
+
+    def test_optional_play_count_failures_do_not_block_usable_media(self):
+        media = {'media_type': 2, 'code': 'ABC', 'pk': '123', 'taken_at': 1,
+                 'user': {'pk': '1'}, 'video_versions': [{'url': 'https://example.com/video.mp4'}]}
+        for error in (QueryReturnedBadRequestException, LoginRequiredException, ConnectionException):
+            with self.subTest(error=error):
+                context = Mock()
+                context.doc_id_graphql_query.side_effect = error('unavailable')
+                normalized = Post._normalize_post_data(media, context)
+                self.assertIsNone(normalized['video_play_count'])
+                self.assertEqual(normalized['video_url'], 'https://example.com/video.mp4')
+        context.doc_id_graphql_query.side_effect = AbortDownloadException('explicit abort')
+        with self.assertRaises(AbortDownloadException):
+            Post._normalize_post_data(media, context)
+
+    def test_retry_interrupt_is_recoverable_but_first_attempt_interrupt_is_not(self):
+        for retry in (False, True):
+            with self.subTest(retry=retry), closing(InstaloaderContext(sleep=False, quiet=True)) as context:
+                effects = ([self.response(503)] if retry else []) + [KeyboardInterrupt()]
+                with patch('requests.sessions.Session.request', side_effect=effects), \
+                        patch.object(context._rate_controller, 'wait_before_query'), \
+                        patch.object(context, 'error'):
+                    with self.assertRaises(ConnectionException if retry else KeyboardInterrupt):
+                        context.get_page_data('example/')
 
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):

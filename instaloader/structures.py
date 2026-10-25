@@ -274,7 +274,7 @@ class Post:
                 media = (edge.get("node") or {}).get("media") or {}
                 if media.get("code") == shortcode:
                     return media.get("play_count")
-        except (ConnectionException, BadResponseException):
+        except InstaloaderException:
             pass
         return None
 
