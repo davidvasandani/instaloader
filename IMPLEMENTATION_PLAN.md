@@ -34,3 +34,10 @@ changing downloader behavior. Independently review and run the existing CI.
 Validation: independent `codex review --uncommitted` found no actionable
 regressions in the CI repair. Local Pylint 4.0.2 scored 10.00/10 and MyPy
 reported no issues. Remote matrix and build checks remain the merge gate.
+
+## Reconciliation with updated master
+
+The merged upstream-sync work removed Python 3.9 from CI and already included
+the lint cleanups. Restore its current runner selection; this task now adds
+only documentation relative to master. Preserve both tasks’ root documents.
+Validation after merging master: 21 offline unit tests, Pylint and MyPy pass.
