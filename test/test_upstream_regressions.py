@@ -45,6 +45,19 @@ class UpstreamRegressionTests(unittest.TestCase):
                 self.assertEqual(set(location).intersection({'id', 'pk'}), set(identifier))
                 context.get_json.assert_not_called()
 
+    def test_liker_ids_and_hashing_do_not_fetch_profile_metadata(self):
+        context = Mock()
+        context.is_logged_in = True
+        users = [{'pk': '42', 'username': 'one'}, {'id': '43', 'username': 'two'}]
+        context.get_json.return_value = {'users': users}
+        post = Post(context, {'shortcode': 'ABC', 'id': '123',
+                              'edge_media_preview_like': {'count': 2}})
+        profiles = set(post.get_likes())
+        self.assertEqual({profile.userid for profile in profiles}, {42, 43})
+        context.get_json.assert_called_once_with('api/v1/media/123/likers/', {})
+        context.doc_id_graphql_query.assert_not_called()
+        self.assertNotIn('id', users[0])
+
     def test_csrf_network_failures_use_instaloader_exception(self):
         for failure in (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             with self.subTest(failure=failure), closing(InstaloaderContext(sleep=False, quiet=True)) as context:

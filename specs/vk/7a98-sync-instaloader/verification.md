@@ -22,3 +22,5 @@ Independent Codex CLI review (against c69eff0) reproduced two P2 findings: valid
 After removing generated packaging files, an archive wheel build passed and every packaged Python module matched its source byte-for-byte.
 
 Second Codex review reproduced a P2 geotag failure: the new web-info response uses location.pk while Post.location expects location.id. Normalize a copied nested location dictionary, retaining an existing id and avoiding mutation of input. Regression coverage exercises pk-only, id-only, and both identifiers through Post.from_shortcode and Post.location.
+
+Third review reproduced a P2 liker-ID mismatch: the new endpoint returns pk, causing Profile.userid and set operations to fetch each profile again. Copy pk to a missing id while preserving the source dictionary. A regression test confirms both pk and id inputs support set collection and ID reads without extra GraphQL requests.

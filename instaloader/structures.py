@@ -887,7 +887,10 @@ class Post:
             return
         data = self._context.get_json(f"api/v1/media/{self.mediaid}/likers/", {})
         for user in data["users"]:
-            yield Profile(self._context, user)
+            node = user.copy()
+            if node.get("id") is None and "pk" in node:
+                node["id"] = node["pk"]
+            yield Profile(self._context, node)
 
     @property
     def is_sponsored(self) -> bool:
