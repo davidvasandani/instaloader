@@ -22,3 +22,6 @@ Searched homelab/knowledge-base, homelab/docs/knowledge-base and homelab/docs/kn
 - `homelab/knowledge-base/ohana-external-feed-mirrors.md`: retain historical media; missing upstream items should not erase an archive.
 
 This is a separate one-off Instaloader operation, not an Ohana integration. Use public access or a session explicitly available to Instaloader. Keep media and secrets outside Git; preserve resumability and evidence of incomplete coverage.
+
+## 527c GraphQL correction
+See upstream-sync-compatibility.md: retain fork list-only behavior, offline checks and bounded retries. Live sanitized response: HTTP 200, GraphQL errors code 1675004, message Rate limit exceeded. Existing recursive get_json retry omits use_post. A metadata exception can therefore hide actual throttling; no access bypass is intended.
