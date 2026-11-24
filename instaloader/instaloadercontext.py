@@ -486,6 +486,14 @@ class InstaloaderContext:
                 raise ConnectionException(self._response_error(resp))
             else:
                 resp_json = resp.json()
+            # GraphQL can report throttling in a successful HTTP response.
+            # Reuse the same bounded backoff as an HTTP 429, without treating
+            # unrelated GraphQL failures as rate limits.
+            if is_graphql_query or is_doc_id_query:
+                errors = resp_json.get('errors')
+                if isinstance(errors, list) and any(
+                        isinstance(error, dict) and error.get('code') == 1675004 for error in errors):
+                    raise TooManyRequestsException("GraphQL rate limit exceeded (error code 1675004).")
             if 'status' in resp_json and resp_json['status'] != "ok":
                 raise ConnectionException(self._response_error(resp))
             return resp_json
@@ -508,7 +516,7 @@ class InstaloaderContext:
                     if is_other_query:
                         self._rate_controller.handle_429('other')
                 return self.get_json(path=path, params=params, host=host, session=sess, _attempt=_attempt + 1,
-                                     response_headers=response_headers)
+                                     response_headers=response_headers, use_post=use_post)
             except KeyboardInterrupt:
                 self.error("[skipped by user]", repeat_at_end=False)
                 raise ConnectionException(error_string) from err

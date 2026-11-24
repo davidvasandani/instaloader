@@ -41,3 +41,10 @@ The merged upstream-sync work removed Python 3.9 from CI and already included
 the lint cleanups. Restore its current runner selection; this task now adds
 only documentation relative to master. Preserve both tasks’ root documents.
 Validation after merging master: 21 offline unit tests, Pylint and MyPy pass.
+
+## 527c GraphQL rate-limit correction
+1. Capture sanitized HTTP-200 GraphQL rate-limit fixture.
+2. Recognize code 1675004 in get_json for GraphQL requests; use existing TooManyRequestsException retry handling.
+3. Preserve use_post when retrying; test unchanged request method/body and bounded exhaustion.
+4. Run offline regression tests, pylint, mypy and independent Codex review.
+5. Commit knowledge, open reviewed fork PR via VK and merge after CI; provide upstream contribution separately without fork documentation.
