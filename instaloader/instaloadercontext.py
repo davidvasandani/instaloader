@@ -563,6 +563,12 @@ class InstaloaderContext:
 
                 self._raise_for_status(resp)
                 resp_json = resp.json()
+                # GraphQL may report throttling inside an HTTP 200 response.
+                if path.rstrip('/') in ('graphql/query', 'api/graphql'):
+                    errors = resp_json.get('errors')
+                    if isinstance(errors, list) and any(
+                            isinstance(error, dict) and error.get('code') == 1675004 for error in errors):
+                        raise TooManyRequestsException("GraphQL rate limit exceeded (error code 1675004).")
                 if 'status' in resp_json and resp_json['status'] != "ok":
                     raise ConnectionException(self._response_error(resp))
                 return resp_json
