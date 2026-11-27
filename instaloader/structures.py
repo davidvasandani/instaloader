@@ -434,7 +434,7 @@ class Post:
                     "__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider": False,
                 },
                 # As the logged-out web app does.
-                web_api=not self._context.is_logged_in,
+                **({"web_api": True} if not self._context.is_logged_in else {}),
             )
             web_info = (resp.get("data") or {}).get("xdt_api__v1__media__shortcode__web_info") or {}
             items = web_info.get("items")
@@ -1425,9 +1425,10 @@ class Profile:
 	   Use :attr:`profile_pic_url`."""
         return self.profile_pic_url
 
-    def get_posts(self) -> NodeIterator[Post]:
+    def get_posts(self, *, metadata: bool = True) -> NodeIterator[Post]:
         """Retrieve all posts from a profile.
 
+        :param metadata: Resolve full metadata while iterating public posts. Disable for shortcode-only exports.
         :rtype: NodeIterator[Post]
         :raises PrivateProfileNotFollowedException: When logged in and the profile is private and not followed.
         :raises LoginRequiredException: When not logged in and the profile is private."""
@@ -1450,17 +1451,21 @@ class Profile:
                         None)
             if user is None:
                 raise BadResponseException(f"The page of profile {self.username} did not contain its posts.")
+            def wrap_post(node):
+                if metadata:
+                    return Post.from_shortcode(self._context, node["code"], owner_profile=self)
+                return Post(self._context, node, owner_profile=self)
+
             return NodeIterator(
                 context=self._context,
                 edge_extractor=lambda d: d["data"]["node"]["polaris_ordered_timeline_connection"],
-                # The nodes lack most of the post's metadata, as in get_reels().
-                node_wrapper=lambda n: Post.from_shortcode(self._context, n["code"], owner_profile=self),
+                node_wrapper=wrap_post,
                 query_variables={
                     "id": user["id"],
                     "__relay_internal__pv__PolarisSEOIsCrawlerrelayprovider": False,
                 },
                 query_referer="https://www.instagram.com/{0}/".format(self.username),
-                is_first=Profile._make_is_newest_checker(),
+                is_first=Profile._make_is_newest_checker() if metadata else None,
                 doc_id="28904005159232689",
                 query_hash=None,
                 first_data=user["polaris_ordered_timeline_connection"],

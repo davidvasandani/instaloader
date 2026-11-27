@@ -125,7 +125,8 @@ class NodeIterator(Iterator[T]):
             pagination_variables['last'] = None
         data = self._edge_extractor(
             self._context.doc_id_graphql_query(
-                doc_id, {**self._query_variables, **pagination_variables}, self._query_referer, self._web_api
+                doc_id, {**self._query_variables, **pagination_variables}, self._query_referer,
+                **({"web_api": True} if self._web_api else {}),
             )
         )
         self._best_before = datetime.now() + NodeIterator._shelf_life

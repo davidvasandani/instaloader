@@ -8,6 +8,7 @@ import string
 import sys
 import tempfile
 from contextlib import contextmanager, suppress
+from itertools import islice
 from datetime import datetime, timezone
 from functools import wraps
 from io import BytesIO
@@ -1064,11 +1065,12 @@ class Instaloader:
                 check_bbd=self.check_resume_bbd,
                 enabled=self.resume_prefix is not None
         ) as (is_resuming, start_index):
-            for number, post in enumerate(posts, start=start_index + 1):
+            remaining = posts if max_count is None else islice(posts, max(0, max_count - start_index))
+            for number, post in enumerate(remaining, start=start_index + 1):
                 should_stop = not takewhile(post)
                 if should_stop and number <= possibly_pinned:
                     continue
-                if (max_count is not None and number > max_count) or should_stop:
+                if should_stop:
                     break
                 if displayed_count is not None:
                     self.context.log("[{0:{w}d}/{1:{w}d}] ".format(number, displayed_count,

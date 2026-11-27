@@ -510,7 +510,7 @@ class InstaloaderContext:
         raise ConnectionException(self._response_error(resp))
 
     def get_json(self, path: str, params: Dict[str, Any], host: str = 'www.instagram.com',
-                 session: Optional[requests.Session] = None,
+                 session: Optional[requests.Session] = None, _attempt: int = 1,
                  response_headers: Optional[Dict[str, Any]] = None,
                  use_post: bool = False) -> Dict[str, Any]:
         """JSON request to Instagram.
@@ -532,7 +532,7 @@ class InstaloaderContext:
            Added `use_post` parameter.
 
         .. versionchanged:: 4.16
-           Removed the internal `_attempt` parameter; retries are no longer implemented by recursion.
+           The internal `_attempt` parameter is retained for positional compatibility and ignored.
         """
         sess = session or self._session
         rate_limit_key = self._rate_limit_key(path, params, host)

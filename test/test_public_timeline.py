@@ -28,7 +28,7 @@ class PublicTimelineTests(unittest.TestCase):
                 self.assertEqual(iterator.total_index, 1)
                 get_page.assert_called_once_with('example/')
                 self.assertEqual(query.call_args_list[1].args[1]['after'], 'next')
-                self.assertTrue(query.call_args_list[1].args[3])
+                self.assertTrue(query.call_args_list[1].kwargs["web_api"])
 
     def test_throttle_stops_iteration(self):
         with closing(InstaloaderContext(sleep=False, quiet=True)) as context:
