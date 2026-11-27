@@ -49,6 +49,10 @@ class BadResponseException(InstaloaderException):
     pass
 
 
+class PostMetadataException(BadResponseException):
+    """A single post returned unusable metadata."""
+
+
 class BadCredentialsException(LoginException):
     pass
 

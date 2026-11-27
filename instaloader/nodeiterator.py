@@ -2,12 +2,14 @@ import base64
 import hashlib
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from lzma import LZMAError
-from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Set, Tuple, TypeVar
 
-from .exceptions import InvalidArgumentException
+from .exceptions import (BadResponseException, InvalidArgumentException, PostMetadataException,
+                         QueryReturnedNotFoundException)
 from .instaloadercontext import InstaloaderContext
 
 class FrozenNodeIterator(NamedTuple):
@@ -69,6 +71,9 @@ class NodeIterator(Iterator[T]):
 
     .. versionchanged: 4.13
        Included support for `doc_id`-based queries (using POST method).
+
+    .. versionchanged: 4.16
+       Added `web_api` parameter, see :meth:`InstaloaderContext.doc_id_graphql_query`.
     """
 
     _graphql_page_length = 12
@@ -83,10 +88,15 @@ class NodeIterator(Iterator[T]):
                  query_referer: Optional[str] = None,
                  first_data: Optional[Dict[str, Any]] = None,
                  is_first: Optional[Callable[[T, Optional[T]], bool]] = None,
-                 doc_id: Optional[str] = None):
+                 doc_id: Optional[str] = None,
+                 web_api: bool = False, skip_unavailable: bool = False):
         self._context = context
         self._query_hash = query_hash
         self._doc_id = doc_id
+        self._web_api = web_api
+        self._skip_unavailable = skip_unavailable
+        self._last_node_missing = False
+        self._seen_cursors: Set[str] = set()
         self._edge_extractor = edge_extractor
         self._node_wrapper = node_wrapper
         self._query_variables = query_variables if query_variables is not None else {}
@@ -110,15 +120,16 @@ class NodeIterator(Iterator[T]):
             return self._query_query_hash(self._query_hash, after)
 
     def _query_doc_id(self, doc_id: str, after: Optional[str] = None) -> Dict:
-        pagination_variables: Dict[str, Any] = {'__relay_internal__pv__PolarisFeedShareMenurelayprovider': False}
+        pagination_variables: Dict[str, Any] = {}
         if after is not None:
             pagination_variables['after'] = after
             pagination_variables['before'] = None
-            pagination_variables['first'] = 12
+            pagination_variables['first'] = NodeIterator._graphql_page_length
             pagination_variables['last'] = None
         data = self._edge_extractor(
             self._context.doc_id_graphql_query(
-                doc_id, {**self._query_variables, **pagination_variables}, self._query_referer
+                doc_id, {**self._query_variables, **pagination_variables}, self._query_referer,
+                **({"web_api": True} if self._web_api else {}),
             )
         )
         self._best_before = datetime.now() + NodeIterator._shelf_life
@@ -140,34 +151,56 @@ class NodeIterator(Iterator[T]):
         return self
 
     def __next__(self) -> T:
-        if self._page_index < len(self._data['edges']):
-            node = self._data['edges'][self._page_index]['node']
-            page_index, total_index = self._page_index, self._total_index
-            try:
-                self._page_index += 1
-                self._total_index += 1
-            except KeyboardInterrupt:
-                self._page_index, self._total_index = page_index, total_index
-                raise
-            item = self._node_wrapper(node)
-            if self._is_first is not None:
-                if self._is_first(item, self.first_item):
-                    self._first_node, self._first_item = node, item
-            else:
-                if self._first_node is None:
-                    self._first_node, self._first_item = node, item
-            return item
-        if self._data.get('page_info', {}).get('has_next_page'):
-            query_response = self._query(self._data['page_info']['end_cursor'])
-            if self._data['edges'] != query_response['edges'] and len(query_response['edges']) > 0:
-                page_index, data = self._page_index, self._data
+        while True:
+            if self._page_index < len(self._data['edges']):
+                edge = self._data['edges'][self._page_index]
+                if self._skip_unavailable:
+                    node = (edge.get("node") or {}) if isinstance(edge, dict) else {}
+                else:
+                    node = edge["node"]
+                page_index, total_index = self._page_index, self._total_index
                 try:
-                    self._page_index = 0
-                    self._data = query_response
+                    self._page_index += 1
+                    self._total_index += 1
+                    self._last_node_missing = False
                 except KeyboardInterrupt:
-                    self._page_index, self._data = page_index, data
+                    self._page_index, self._total_index = page_index, total_index
                     raise
-                return self.__next__()
+                try:
+                    item = self._node_wrapper(node)
+                except (PostMetadataException, QueryReturnedNotFoundException) as err:
+                    if self._skip_unavailable:
+                        self._total_index -= 1
+                        self._last_node_missing = True
+                        self._context.error(f"Skipping unavailable timeline item: {err}")
+                        continue
+                    raise
+                if self._is_first is not None:
+                    if self._is_first(item, self.first_item):
+                        self._first_node, self._first_item = node, item
+                elif self._first_node is None:
+                    self._first_node, self._first_item = node, item
+                return item
+            page_info = self._data.get('page_info', {})
+            if not page_info.get('has_next_page'):
+                break
+            cursor = page_info.get('end_cursor')
+            if self._skip_unavailable:
+                if not isinstance(cursor, str) or not cursor or cursor in self._seen_cursors:
+                    raise BadResponseException("The public timeline pagination cursor did not advance.")
+                query_response = self._query(cursor)
+                self._seen_cursors.add(cursor)
+            else:
+                query_response = self._query(page_info['end_cursor'])
+                if self._data['edges'] == query_response['edges'] or not query_response['edges']:
+                    break
+            page_index, data = self._page_index, self._data
+            try:
+                self._page_index = 0
+                self._data = query_response
+            except KeyboardInterrupt:
+                self._page_index, self._data = page_index, data
+                raise
         raise StopIteration()
 
     @property
@@ -205,11 +238,14 @@ class NodeIterator(Iterator[T]):
         if self._first_item is None:
             # Restore _first_item from _first_node. Needed after thawing, since
             # FrozenNodeIterator stores the node, not the item.
-            self._first_item = (
-                self._node_wrapper(self._first_node)
-                if self._first_node is not None
-                else None
-            )
+            if self._first_node is not None:
+                try:
+                    self._first_item = self._node_wrapper(self._first_node)
+                except (PostMetadataException, QueryReturnedNotFoundException) as err:
+                    if not self._skip_unavailable:
+                        raise
+                    self._context.error(f"Saved timestamp reference is unavailable: {err}", repeat_at_end=False)
+                    self._first_node = None
         return self._first_item
 
     @staticmethod
@@ -219,15 +255,16 @@ class NodeIterator(Iterator[T]):
     def freeze(self) -> FrozenNodeIterator:
         """Freeze the iterator for later resuming."""
         remaining_data = None
+        rewind = int(self._page_index > 0 and not self._last_node_missing)
         if self._data is not None:
             remaining_data = {**self._data,
-                              'edges': (self._data['edges'][(max(self._page_index - 1, 0)):])}
+                              'edges': (self._data['edges'][(max(self._page_index - rewind, 0)):])}
         return FrozenNodeIterator(
             query_hash=self._query_hash,
             query_variables=self._query_variables,
             query_referer=self._query_referer,
             context_username=self._context.username,
-            total_index=max(self.total_index - 1, 0),
+            total_index=max(self.total_index - rewind, 0),
             best_before=self._best_before.timestamp() if self._best_before else None,
             remaining_data=remaining_data,
             first_node=self._first_node,
@@ -325,14 +362,31 @@ def resumable_iteration(context: InstaloaderContext,
             context.log("Resuming from {}.".format(resume_file_path))
         except (InvalidArgumentException, LZMAError, json.decoder.JSONDecodeError, EOFError) as exc:
             context.error("Warning: Not resuming from {}: {}".format(resume_file_path, exc))
+    def persist_checkpoint(checkpoint: FrozenNodeIterator) -> None:
+        directory = os.path.dirname(resume_file_path) or "."
+        os.makedirs(directory, exist_ok=True)
+        suffix = os.path.splitext(resume_file_path)[1]
+        with tempfile.NamedTemporaryFile(dir=directory, suffix=suffix, delete=False) as temporary:
+            temporary_path = temporary.name
+        try:
+            save(checkpoint, temporary_path)
+            os.replace(temporary_path, resume_file_path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+        context.log("\nSaved resume information to {}.".format(resume_file_path))
+
+    starting_checkpoint = iterator.freeze()
+    errors_before_iteration = len(context.error_log)
     try:
         yield is_resuming, start_index
     except (Exception, KeyboardInterrupt):
-        if os.path.dirname(resume_file_path):
-            os.makedirs(os.path.dirname(resume_file_path), exist_ok=True)
-        save(iterator.freeze(), resume_file_path)
-        context.log("\nSaved resume information to {}.".format(resume_file_path))
+        # Revisit failed posts on resume so a later incremental run cannot skip them.
+        checkpoint = starting_checkpoint if len(context.error_log) > errors_before_iteration else iterator.freeze()
+        persist_checkpoint(checkpoint)
         raise
-    if resume_file_exists:
+    if len(context.error_log) > errors_before_iteration:
+        persist_checkpoint(starting_checkpoint)
+    elif resume_file_exists:
         os.unlink(resume_file_path)
         context.log("Iteration complete, deleted resume information file {}.".format(resume_file_path))

@@ -11,6 +11,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from functools import wraps
 from io import BytesIO
+from itertools import islice
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Set, Union, cast
 from urllib.parse import urlparse
@@ -85,31 +86,37 @@ def _requires_login(func: Callable) -> Callable:
 def _retry_on_connection_error(func: Callable) -> Callable:
     """Decorator to retry the function max_connection_attempts number of times.
 
-    Herewith-decorated functions need an ``_attempt`` keyword argument.
-
     This is to decorate functions that do network requests that may fail. Note that
     :meth:`.get_json`, :meth:`.get_iphone_json`, :meth:`.graphql_query` and :meth:`.graphql_node_list` already have
     their own logic for retrying, hence functions that only use these for network access must not be decorated with this
-    decorator."""
+    decorator.
+
+    .. versionchanged:: 4.16
+       Decorated functions no longer need to accept an ``_attempt`` keyword argument.
+    """
     @wraps(func)
-    def call(instaloader, *args, **kwargs):
-        try:
-            return func(instaloader, *args, **kwargs)
-        except (urllib3.exceptions.HTTPError, requests.exceptions.RequestException, ConnectionException) as err:
-            error_string = "{}({}): {}".format(func.__name__, ', '.join([repr(arg) for arg in args]), err)
-            if (kwargs.get('_attempt') or 1) == instaloader.context.max_connection_attempts:
-                raise ConnectionException(error_string) from None
-            instaloader.context.error(error_string + " [retrying; skip with ^C]", repeat_at_end=False)
+    def call(instaloader, *args, **kwargs) -> Any:
+        # The failure we are currently retrying, if any. It tells us whether a ^C means "skip this
+        # download" rather than "abort everything", and whether to sleep before the next attempt.
+        pending_error_string: Optional[str] = None
+        attempt = 0
+        while True:
+            attempt += 1
             try:
-                if kwargs.get('_attempt'):
-                    kwargs['_attempt'] += 1
-                else:
-                    kwargs['_attempt'] = 2
-                instaloader.context.do_sleep()
-                return call(instaloader, *args, **kwargs)
+                if pending_error_string is not None:
+                    instaloader.context.do_sleep()
+                return func(instaloader, *args, **kwargs)
+            except (urllib3.exceptions.HTTPError, requests.exceptions.RequestException, ConnectionException) as err:
+                error_string = "{}({}): {}".format(func.__name__, ', '.join([repr(arg) for arg in args]), err)
+                if attempt == instaloader.context.max_connection_attempts:
+                    raise ConnectionException(error_string) from None
+                instaloader.context.error(error_string + " [retrying; skip with ^C]", repeat_at_end=False)
+                pending_error_string = error_string
             except KeyboardInterrupt:
+                if pending_error_string is None:
+                    raise
                 instaloader.context.error("[skipped by user]", repeat_at_end=False)
-                raise ConnectionException(error_string) from None
+                raise ConnectionException(pending_error_string) from None
     return call
 
 
@@ -334,12 +341,15 @@ class Instaloader:
         return f"<Instaloader context={self.context}>"
 
     @_retry_on_connection_error
-    def download_pic(self, filename: str, url: str, mtime: datetime,
-                     filename_suffix: Optional[str] = None, _attempt: int = 1) -> bool:
+    def download_pic(self, filename: str, url: Optional[str], mtime: datetime,
+                     filename_suffix: Optional[str] = None) -> bool:
         """Downloads and saves picture with given url under given directory with given timestamp.
         Returns true, if file was actually downloaded, i.e. updated."""
         if filename_suffix is not None:
             filename += '_' + filename_suffix
+        if not url:
+            self.context.error(f"No media URL available for {filename}.")
+            return False
         urlmatch = re.search('\\.[a-z0-9]*\\?', url)
         file_extension = url[-3:] if urlmatch is None else urlmatch.group(0)[1:-1]
         nominal_filename = filename + '.' + file_extension
@@ -519,8 +529,9 @@ class Instaloader:
                                 '{0}_{1}_{2}.{3}'.format(target, identifier, name_suffix, extension))
 
     @_retry_on_connection_error
-    def download_title_pic(self, url: str, target: Union[str, Path], name_suffix: str, owner_profile: Optional[Profile],
-                           _attempt: int = 1) -> None:
+    def download_title_pic(
+            self, url: str, target: Union[str, Path], name_suffix: str, owner_profile: Optional[Profile]
+    ) -> None:
         """Downloads and saves a picture that does not have an association with a Post or StoryItem, such as a
         Profile picture or a Highlight cover picture. Modification time is taken from the HTTP response headers.
 
@@ -669,13 +680,16 @@ class Instaloader:
         self.context.two_factor_login(two_factor_code)
 
     @staticmethod
-    def __prepare_filename(filename_template: str, url: Callable[[], str]) -> str:
+    def __prepare_filename(filename_template: str, url: Callable[[], Optional[str]]) -> str:
         """Replace filename token inside filename_template with url's filename and assure the directories exist.
 
         .. versionadded:: 4.6"""
         if "{filename}" in filename_template:
+            media_url = url()
+            if not media_url:
+                raise BadResponseException("No media URL available to resolve the filename.")
             filename = filename_template.replace("{filename}",
-                                                 os.path.splitext(os.path.basename(urlparse(url()).path))[0])
+                                                 os.path.splitext(os.path.basename(urlparse(media_url).path))[0])
         else:
             filename = filename_template
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -725,6 +739,8 @@ class Instaloader:
         # Download the image(s) / video thumbnail and videos within sidecars if desired
         downloaded = True
         if post.typename == 'GraphSidecar':
+            if (self.download_pictures or self.download_videos) and post.mediacount == 0:
+                self.context.error(f"No media found for carousel {post}.")
             if (self.download_pictures or self.download_videos) and post.mediacount > 0:
                 if not _all_already_downloaded(
                         filename_template, enumerate(
@@ -741,13 +757,21 @@ class Instaloader:
                         if '{filename}' in self.filename_pattern:
                             suffix = None
                         video_url = sidecar_node.video_url
-                        if self.download_pictures and (video_url is None or self.download_video_thumbnails):
+                        if (sidecar_node.is_video and self.download_videos and not video_url
+                                and (suffix is None or not os.path.isfile(f"{filename_template}_{suffix}.mp4"))):
+                            self.context.error(f"Video for slide {edge_number} of {post} is unavailable.")
+                        wants_image = self.download_pictures and (not sidecar_node.is_video
+                                                                  or self.download_video_thumbnails
+                                                                  or (self.download_videos and not video_url))
+                        if wants_image and sidecar_node.display_url:
                             # pylint:disable=cell-var-from-loop
                             sidecar_filename = self.__prepare_filename(filename_template,
                                                                        lambda: sidecar_node.display_url)
-                            # Download sidecar picture or video thumbnail (--no-pictures implies --no-video-thumbnails)
                             downloaded &= self.download_pic(filename=sidecar_filename, url=sidecar_node.display_url,
                                                             mtime=post.date_local, filename_suffix=suffix)
+                        elif wants_image and (suffix is None
+                                              or not os.path.isfile(f"{filename_template}_{suffix}.jpg")):
+                            self.context.error(f"Image for slide {edge_number} of {post} is unavailable.")
                         if video_url is not None and self.download_videos:
                             # pylint:disable=cell-var-from-loop
                             sidecar_filename = self.__prepare_filename(filename_template,
@@ -963,6 +987,11 @@ class Instaloader:
         .. versionchanged:: 4.3
            Also downloads and saves the Highlight's cover pictures.
 
+        .. versionchanged:: 4.16
+           Add progress output for highlight retrieval, displaying a counter of the current
+           highlight number and the total number of highlights being processed. This provides
+           feedback similar to the per-item download counter already present in this function.
+
         :param user: ID or Profile of the user whose highlights should get downloaded.
         :param fast_update: If true, abort when first already-downloaded picture is encountered
         :param filename_target: Replacement for {target} in dirname_pattern and filename_pattern
@@ -970,14 +999,20 @@ class Instaloader:
         :param storyitem_filter: function(storyitem), which returns True if given StoryItem should be downloaded
         :raises LoginRequiredException: If called without being logged in.
         """
-        for user_highlight in self.get_highlights(user):
+        user_highlights = list(self.get_highlights(user))
+        hl_size = len(user_highlights)
+        for hl_number, user_highlight in enumerate(user_highlights, start=1):
             name = user_highlight.owner_username
             highlight_target: Union[str, Path] = (filename_target
                                 if filename_target
                                 else (Path(_PostPathFormatter.sanitize_path(name, self.sanitize_paths)) /
                                       _PostPathFormatter.sanitize_path(user_highlight.title,
                                                                        self.sanitize_paths)))
-            self.context.log("Retrieving highlights \"{}\" from profile {}".format(user_highlight.title, name))
+            self.context.log(
+                "[{0:{w}d}/{1:{w}d}] Retrieving highlights \"{2}\" from profile {3}".format(
+                    hl_number, hl_size, user_highlight.title, name, w=len(str(hl_size))
+                )
+            )
             self.download_highlight_cover(user_highlight, highlight_target)
             totalcount = user_highlight.itemcount
             count = 1
@@ -1046,11 +1081,12 @@ class Instaloader:
                 check_bbd=self.check_resume_bbd,
                 enabled=self.resume_prefix is not None
         ) as (is_resuming, start_index):
-            for number, post in enumerate(posts, start=start_index + 1):
+            remaining = posts if max_count is None else islice(posts, max(0, max_count - start_index))
+            for number, post in enumerate(remaining, start=start_index + 1):
                 should_stop = not takewhile(post)
                 if should_stop and number <= possibly_pinned:
                     continue
-                if (max_count is not None and number > max_count) or should_stop:
+                if should_stop:
                     break
                 if displayed_count is not None:
                     self.context.log("[{0:{w}d}/{1:{w}d}] ".format(number, displayed_count,
@@ -1063,9 +1099,12 @@ class Instaloader:
                         if not post_filter(post):
                             self.context.log("{} skipped".format(post))
                             continue
+                    except TooManyRequestsException:
+                        raise
                     except (InstaloaderException, KeyError, TypeError) as err:
                         self.context.error("{} skipped. Filter evaluation failed: {}".format(post, err))
                         continue
+                errors_before_post = len(self.context.error_log)
                 with self.context.error_catcher("Download {} of {}".format(post, target)):
                     # The PostChangedException gets raised if the Post's id/shortcode changed while obtaining
                     # additional metadata. This is most likely the case if a HTTP redirect takes place while
@@ -1074,7 +1113,7 @@ class Instaloader:
                     # obained after a redirect has probably already been downloaded as a previous Post of the
                     # same Profile.
                     # Observed in issue #225: https://github.com/instaloader/instaloader/issues/225
-                    post_changed = False
+                    post_changed = post._shortcode_changed  # pylint:disable=protected-access
                     while True:
                         try:
                             downloaded = self.download_post(post, target=target)
@@ -1082,10 +1121,11 @@ class Instaloader:
                         except PostChangedException:
                             post_changed = True
                             continue
-                    if fast_update and not downloaded and not post_changed and number > possibly_pinned:
-                        # disengage fast_update for first post when resuming
-                        if not is_resuming or number > 0:
-                            break
+                    # A resume can replay existing files before reaching the interrupted or failed item.
+                    files_already_present = not (downloaded or post_changed
+                                                 or len(self.context.error_log) != errors_before_post)
+                    if fast_update and not is_resuming and files_already_present and number > possibly_pinned:
+                        break
 
     @_requires_login
     def get_feed_posts(self) -> Iterator[Post]:
@@ -1554,10 +1594,12 @@ class Instaloader:
                         last_scraped = latest_stamps.get_last_post_timestamp(profile_name)
                         posts_takewhile = lambda p: p.date_local > last_scraped
                     posts_to_download = profile.get_posts()
+                    errors_before_download = len(self.context.error_log)
                     self.posts_download_loop(posts_to_download, profile_name, fast_update, post_filter,
                                              total_count=profile.mediacount, owner_profile=profile,
                                              takewhile=posts_takewhile, possibly_pinned=3, max_count=max_count)
-                    if latest_stamps is not None and posts_to_download.first_item is not None:
+                    if (latest_stamps is not None and len(self.context.error_log) == errors_before_download
+                            and posts_to_download.first_item is not None):
                         latest_stamps.set_last_post_timestamp(profile_name,
                                                               posts_to_download.first_item.date_local)
 
@@ -1703,14 +1745,15 @@ class Instaloader:
         urls = []
         count = 0
 
+        if max_count is not None and max_count <= 0:
+            posts = iter(())
         for post in posts:
-            if max_count is not None and count >= max_count:
-                break
-
             if post_filter is not None:
                 try:
                     if not post_filter(post):
                         continue
+                except TooManyRequestsException:
+                    raise
                 except (InstaloaderException, KeyError, TypeError) as err:
                     self.context.error("Post skipped. Filter evaluation failed: {}".format(err))
                     continue
@@ -1719,6 +1762,8 @@ class Instaloader:
             urls.append(url)
             count += 1
             self.context.log(f"[{count}] {url}")
+            if max_count is not None and count >= max_count:
+                break
 
         # Write URLs to file
         with open(filename, 'w', encoding='utf-8') as f:
