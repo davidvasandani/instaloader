@@ -1000,6 +1000,7 @@ class Profile:
         self._context = context
         self._has_public_story: Optional[bool] = None
         self._public_profile_page: Optional[List[Dict[str, Any]]] = None
+        self._from_public_page = False
         self._node = node
         self._has_full_metadata = False
         self._iphone_struct_ = None
@@ -1042,7 +1043,9 @@ class Profile:
             return cls(context, node)
         profile = cls(context, cls._normalize_profile_data(node))
         # Retain the first posts page for the next public timeline iteration.
-        profile._public_profile_page = page  # pylint:disable=protected-access
+        # pylint:disable=protected-access
+        profile._public_profile_page = page
+        profile._from_public_page = True
         return profile
 
     @classmethod
@@ -1074,10 +1077,7 @@ class Profile:
         except QueryReturnedNotFoundException:
             user = None
         if user and user.get('username'):
-            node = cls._normalize_profile_data(user)
-            if (context.is_logged_in and 'followed_by_viewer' not in user
-                    and 'following' not in (user.get('friendship_status') or {})):
-                node.pop('followed_by_viewer', None)
+            node = cls._normalize_profile_data(user, default_relationships=not context.is_logged_in)
             profile = cls(context, node)
         else:
             raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
@@ -1174,7 +1174,7 @@ class Profile:
             raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username)) from err
 
     @staticmethod
-    def _normalize_profile_data(user_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_profile_data(user_data: Dict[str, Any], *, default_relationships: bool = True) -> Dict[str, Any]:
         """Normalize PolarisProfilePageContentQuery response to match legacy format."""
         normalized = user_data.copy()
         if 'id' not in normalized and 'pk' in normalized:
@@ -1195,18 +1195,17 @@ class Profile:
         if 'business_category_name' not in normalized and 'category' in normalized:
             normalized['business_category_name'] = normalized['category']
         friendship = normalized.get('friendship_status', {}) or {}
-        if 'followed_by_viewer' not in normalized:
-            normalized['followed_by_viewer'] = friendship.get('following', False)
-        if 'follows_viewer' not in normalized:
-            normalized['follows_viewer'] = friendship.get('followed_by', False)
-        if 'blocked_by_viewer' not in normalized:
-            normalized['blocked_by_viewer'] = friendship.get('blocking', False)
-        if 'has_blocked_viewer' not in normalized:
-            normalized['has_blocked_viewer'] = False
-        if 'has_requested_viewer' not in normalized:
-            normalized['has_requested_viewer'] = friendship.get('incoming_request', False)
-        if 'requested_by_viewer' not in normalized:
-            normalized['requested_by_viewer'] = friendship.get('outgoing_request', False)
+        for field, friendship_field in (
+            ('followed_by_viewer', 'following'),
+            ('follows_viewer', 'followed_by'),
+            ('blocked_by_viewer', 'blocking'),
+            ('has_requested_viewer', 'incoming_request'),
+            ('requested_by_viewer', 'outgoing_request'),
+        ):
+            if default_relationships or friendship_field in friendship:
+                normalized.setdefault(field, friendship.get(friendship_field, False))
+        if default_relationships:
+            normalized.setdefault('has_blocked_viewer', False)
         if 'profile_pic_url_hd' not in normalized:
             hd_info = normalized.get('hd_profile_pic_url_info')
             if hd_info and 'url' in hd_info:
@@ -1274,7 +1273,7 @@ class Profile:
 
         .. versionchanged:: 4.16
            Returns None if unavailable (e.g. when not logged in)."""
-        if not self._context.is_logged_in:
+        if self._from_public_page and not self._context.is_logged_in:
             return (self._node.get('edge_owner_to_timeline_media') or {}).get('count')
         with suppress(KeyError):
             return self._metadata('edge_owner_to_timeline_media', 'count')
