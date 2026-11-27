@@ -339,6 +339,8 @@ class Post:
         if media.get("has_liked") is not None:
             pic_json["viewer_has_liked"] = media["has_liked"]
         carousel = media.get("carousel_media") or []
+        if media_type == 8 and not carousel:
+            raise PostMetadataException(f"Carousel {pic_json['shortcode']} contains no media.")
         if carousel:
             carousel_nodes = []
             for item in carousel:
@@ -356,6 +358,13 @@ class Post:
                     node["accessibility_caption"] = item["accessibility_caption"]
                 carousel_nodes.append({"node": node})
             pic_json["edge_sidecar_to_children"] = {"edges": carousel_nodes}
+            if not pic_json["display_url"]:
+                for edge in carousel_nodes:
+                    slide = edge["node"]
+                    url = slide["display_url"] or slide["video_url"]
+                    if url:
+                        pic_json["display_url"] = url
+                        break
         tagged = (media.get("usertags") or {}).get("in") or []
         if tagged:
             pic_json["edge_media_to_tagged_user"] = {
@@ -691,6 +700,8 @@ class Post:
             version_urls = []
             try:
                 version_urls.append(self._field('video_url'))
+            except TooManyRequestsException:
+                raise
             except (InstaloaderException, KeyError, IndexError) as err:
                 self._context.error(f"Warning: Unable to fetch video from graphql of {self}: {err}")
             if self._context.iphone_support and self._context.is_logged_in:
@@ -1465,6 +1476,8 @@ class Profile:
             if user is None:
                 raise BadResponseException(f"The page of profile {self.username} did not contain its posts.")
             def wrap_post(node):
+                if not isinstance(node, dict) or not isinstance(node.get("code"), str) or not node["code"]:
+                    raise PostMetadataException("Public timeline entry omitted its shortcode.")
                 if metadata:
                     return Post.from_shortcode(self._context, node["code"], owner_profile=self)
                 return Post(self._context, node, owner_profile=self, lazy_metadata=True)

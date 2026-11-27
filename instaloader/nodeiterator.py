@@ -2,12 +2,14 @@ import base64
 import hashlib
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from lzma import LZMAError
-from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Set, Tuple, TypeVar
 
-from .exceptions import InvalidArgumentException, PostMetadataException, QueryReturnedNotFoundException
+from .exceptions import (BadResponseException, InvalidArgumentException, PostMetadataException,
+                         QueryReturnedNotFoundException)
 from .instaloadercontext import InstaloaderContext
 
 class FrozenNodeIterator(NamedTuple):
@@ -94,6 +96,7 @@ class NodeIterator(Iterator[T]):
         self._web_api = web_api
         self._skip_unavailable = skip_unavailable
         self._last_node_missing = False
+        self._seen_cursors: Set[str] = set()
         self._edge_extractor = edge_extractor
         self._node_wrapper = node_wrapper
         self._query_variables = query_variables if query_variables is not None else {}
@@ -150,7 +153,11 @@ class NodeIterator(Iterator[T]):
     def __next__(self) -> T:
         while True:
             if self._page_index < len(self._data['edges']):
-                node = self._data['edges'][self._page_index]['node']
+                edge = self._data['edges'][self._page_index]
+                if self._skip_unavailable:
+                    node = (edge.get("node") or {}) if isinstance(edge, dict) else {}
+                else:
+                    node = edge["node"]
                 page_index, total_index = self._page_index, self._total_index
                 try:
                     self._page_index += 1
@@ -177,9 +184,16 @@ class NodeIterator(Iterator[T]):
             page_info = self._data.get('page_info', {})
             if not page_info.get('has_next_page'):
                 break
-            query_response = self._query(page_info['end_cursor'])
-            if self._data['edges'] == query_response['edges'] or not query_response['edges']:
-                break
+            cursor = page_info.get('end_cursor')
+            if self._skip_unavailable:
+                if not isinstance(cursor, str) or not cursor or cursor in self._seen_cursors:
+                    raise BadResponseException("The public timeline pagination cursor did not advance.")
+                query_response = self._query(cursor)
+                self._seen_cursors.add(cursor)
+            else:
+                query_response = self._query(page_info['end_cursor'])
+                if self._data['edges'] == query_response['edges'] or not query_response['edges']:
+                    break
             page_index, data = self._page_index, self._data
             try:
                 self._page_index = 0
@@ -349,9 +363,17 @@ def resumable_iteration(context: InstaloaderContext,
         except (InvalidArgumentException, LZMAError, json.decoder.JSONDecodeError, EOFError) as exc:
             context.error("Warning: Not resuming from {}: {}".format(resume_file_path, exc))
     def persist_checkpoint(checkpoint: FrozenNodeIterator) -> None:
-        if os.path.dirname(resume_file_path):
-            os.makedirs(os.path.dirname(resume_file_path), exist_ok=True)
-        save(checkpoint, resume_file_path)
+        directory = os.path.dirname(resume_file_path) or "."
+        os.makedirs(directory, exist_ok=True)
+        suffix = os.path.splitext(resume_file_path)[1]
+        with tempfile.NamedTemporaryFile(dir=directory, suffix=suffix, delete=False) as temporary:
+            temporary_path = temporary.name
+        try:
+            save(checkpoint, temporary_path)
+            os.replace(temporary_path, resume_file_path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
         context.log("\nSaved resume information to {}.".format(resume_file_path))
 
     starting_checkpoint = iterator.freeze()
