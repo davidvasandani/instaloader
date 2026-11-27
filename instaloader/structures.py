@@ -294,7 +294,7 @@ class Post:
         if isinstance(media_type, int):
             typename = media_types.get(media_type)
         if not typename:
-            raise BadResponseException(f"Unknown media_type in metadata: {media_type}.")
+            raise PostMetadataException(f"Unknown media_type in metadata: {media_type}.")
         pic_json: Dict[str, Any] = media.copy()
         pic_json["shortcode"] = media["code"]
         pic_json["id"] = media["pk"]
@@ -441,7 +441,7 @@ class Post:
             if items == [] and not resp.get("errors"):
                 raise QueryReturnedNotFoundException(f"Post {self.shortcode} is unavailable.")
             if not items:
-                raise BadResponseException("Fetching Post metadata failed.")
+                raise PostMetadataException("Fetching Post metadata failed.")
             self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
             if self.shortcode != self._full_metadata_dict['shortcode']:
                 self._node.update(self._full_metadata_dict)

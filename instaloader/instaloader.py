@@ -1574,10 +1574,12 @@ class Instaloader:
                         last_scraped = latest_stamps.get_last_post_timestamp(profile_name)
                         posts_takewhile = lambda p: p.date_local > last_scraped
                     posts_to_download = profile.get_posts()
+                    errors_before_download = len(self.context.error_log)
                     self.posts_download_loop(posts_to_download, profile_name, fast_update, post_filter,
                                              total_count=profile.mediacount, owner_profile=profile,
                                              takewhile=posts_takewhile, possibly_pinned=3, max_count=max_count)
-                    if latest_stamps is not None and posts_to_download.first_item is not None:
+                    if (latest_stamps is not None and len(self.context.error_log) == errors_before_download
+                            and posts_to_download.first_item is not None):
                         latest_stamps.set_last_post_timestamp(profile_name,
                                                               posts_to_download.first_item.date_local)
 

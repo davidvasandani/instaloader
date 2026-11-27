@@ -26,6 +26,7 @@ class PublicTimelineTests(unittest.TestCase):
                 iterator = Profile.from_username(context, 'example').get_posts()
                 self.assertEqual([post.shortcode for post in iterator], ['kept'])
                 self.assertEqual(iterator.total_index, 1)
+                self.assertTrue(context.has_stored_errors)
                 get_page.assert_called_once_with('example/')
                 self.assertEqual(query.call_args_list[2].args[1]['after'], 'next')
                 self.assertTrue(query.call_args_list[2].kwargs["web_api"])

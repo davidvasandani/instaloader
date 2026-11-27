@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from lzma import LZMAError
 from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Tuple, TypeVar
 
-from .exceptions import BadResponseException, InvalidArgumentException, QueryReturnedNotFoundException
+from .exceptions import InvalidArgumentException, PostMetadataException, QueryReturnedNotFoundException
 from .instaloadercontext import InstaloaderContext
 
 class FrozenNodeIterator(NamedTuple):
@@ -161,11 +161,12 @@ class NodeIterator(Iterator[T]):
                     raise
                 try:
                     item = self._node_wrapper(node)
-                except (BadResponseException, QueryReturnedNotFoundException) as err:
+                except (PostMetadataException, QueryReturnedNotFoundException) as err:
                     if self._skip_unavailable:
                         self._total_index -= 1
                         self._last_node_missing = True
-                        self._context.error(f"Skipping unavailable timeline item: {err}", repeat_at_end=False)
+                        self._context.error(f"Skipping unavailable timeline item: {err}",
+                                            repeat_at_end=isinstance(err, PostMetadataException))
                         continue
                     raise
                 if self._is_first is not None:
@@ -227,10 +228,11 @@ class NodeIterator(Iterator[T]):
             if self._first_node is not None:
                 try:
                     self._first_item = self._node_wrapper(self._first_node)
-                except (BadResponseException, QueryReturnedNotFoundException) as err:
+                except (PostMetadataException, QueryReturnedNotFoundException) as err:
                     if not self._skip_unavailable:
                         raise
-                    self._context.error(f"Skipping unavailable saved timeline item: {err}", repeat_at_end=False)
+                    self._context.error(f"Skipping unavailable saved timeline item: {err}",
+                                        repeat_at_end=isinstance(err, PostMetadataException))
                     self._first_node = None
         return self._first_item
 
