@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from lzma import LZMAError
 from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Tuple, TypeVar
 
-from .exceptions import InvalidArgumentException
+from .exceptions import InvalidArgumentException, QueryReturnedNotFoundException
 from .instaloadercontext import InstaloaderContext
 
 class FrozenNodeIterator(NamedTuple):
@@ -87,11 +87,12 @@ class NodeIterator(Iterator[T]):
                  first_data: Optional[Dict[str, Any]] = None,
                  is_first: Optional[Callable[[T, Optional[T]], bool]] = None,
                  doc_id: Optional[str] = None,
-                 web_api: bool = False):
+                 web_api: bool = False, skip_missing: bool = False):
         self._context = context
         self._query_hash = query_hash
         self._doc_id = doc_id
         self._web_api = web_api
+        self._skip_missing = skip_missing
         self._edge_extractor = edge_extractor
         self._node_wrapper = node_wrapper
         self._query_variables = query_variables if query_variables is not None else {}
@@ -145,34 +146,41 @@ class NodeIterator(Iterator[T]):
         return self
 
     def __next__(self) -> T:
-        if self._page_index < len(self._data['edges']):
-            node = self._data['edges'][self._page_index]['node']
-            page_index, total_index = self._page_index, self._total_index
-            try:
-                self._page_index += 1
-                self._total_index += 1
-            except KeyboardInterrupt:
-                self._page_index, self._total_index = page_index, total_index
-                raise
-            item = self._node_wrapper(node)
-            if self._is_first is not None:
-                if self._is_first(item, self.first_item):
-                    self._first_node, self._first_item = node, item
-            else:
-                if self._first_node is None:
-                    self._first_node, self._first_item = node, item
-            return item
-        if self._data.get('page_info', {}).get('has_next_page'):
-            query_response = self._query(self._data['page_info']['end_cursor'])
-            if self._data['edges'] != query_response['edges'] and len(query_response['edges']) > 0:
-                page_index, data = self._page_index, self._data
+        while True:
+            if self._page_index < len(self._data['edges']):
+                node = self._data['edges'][self._page_index]['node']
+                page_index, total_index = self._page_index, self._total_index
                 try:
-                    self._page_index = 0
-                    self._data = query_response
-                except KeyboardInterrupt:
-                    self._page_index, self._data = page_index, data
+                    self._page_index += 1
+                    self._total_index += 1
+                    item = self._node_wrapper(node)
+                except QueryReturnedNotFoundException as err:
+                    if self._skip_missing:
+                        self._context.error(f"Skipping unavailable timeline item: {err}")
+                        continue
                     raise
-                return self.__next__()
+                except KeyboardInterrupt:
+                    self._page_index, self._total_index = page_index, total_index
+                    raise
+                if self._is_first is not None:
+                    if self._is_first(item, self.first_item):
+                        self._first_node, self._first_item = node, item
+                elif self._first_node is None:
+                    self._first_node, self._first_item = node, item
+                return item
+            page_info = self._data.get('page_info', {})
+            if not page_info.get('has_next_page'):
+                break
+            query_response = self._query(page_info['end_cursor'])
+            if self._data['edges'] == query_response['edges'] or not query_response['edges']:
+                break
+            page_index, data = self._page_index, self._data
+            try:
+                self._page_index = 0
+                self._data = query_response
+            except KeyboardInterrupt:
+                self._page_index, self._data = page_index, data
+                raise
         raise StopIteration()
 
     @property
@@ -210,11 +218,14 @@ class NodeIterator(Iterator[T]):
         if self._first_item is None:
             # Restore _first_item from _first_node. Needed after thawing, since
             # FrozenNodeIterator stores the node, not the item.
-            self._first_item = (
-                self._node_wrapper(self._first_node)
-                if self._first_node is not None
-                else None
-            )
+            if self._first_node is not None:
+                try:
+                    self._first_item = self._node_wrapper(self._first_node)
+                except QueryReturnedNotFoundException as err:
+                    if not self._skip_missing:
+                        raise
+                    self._context.error(f"Skipping unavailable saved timeline item: {err}")
+                    self._first_node = None
         return self._first_item
 
     @staticmethod

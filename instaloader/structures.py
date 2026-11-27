@@ -1441,6 +1441,7 @@ class Profile:
                 query_hash=None,
                 first_data=user["polaris_ordered_timeline_connection"],
                 web_api=True,
+                skip_missing=True,
             )
         self._obtain_metadata()
         # Instagram answers with an empty timeline rather than an error in that case. Unlike followed_by_viewer,
