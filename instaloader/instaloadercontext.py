@@ -14,6 +14,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
+from weakref import WeakKeyDictionary
 
 import requests
 import requests.utils
@@ -125,8 +126,8 @@ class InstaloaderContext:
         # Cache profile from id (mapping from id to Profile)
         self.profile_id_cache: Dict[int, Any] = dict()
 
-        # Tokens of the logged-in web page for api/graphql queries, by sessionid cookie
-        self._web_api_tokens_cache: Dict[str, Dict[str, str]] = dict()
+        # Web GraphQL tokens belong to a particular cookie jar and login.
+        self._web_api_tokens_cache: WeakKeyDictionary[requests.Session, Dict[str, Dict[str, str]]] = WeakKeyDictionary()
 
     @contextmanager
     def anonymous_copy(self):
@@ -624,7 +625,8 @@ class InstaloaderContext:
     def _web_api_tokens(self) -> Dict[str, str]:
         """The tokens that the web app sends along with its api/graphql queries, from the start page."""
         sessionid = self._session.cookies.get_dict().get("sessionid", "")
-        if sessionid not in self._web_api_tokens_cache:
+        session_tokens = self._web_api_tokens_cache.setdefault(self._session, {})
+        if sessionid not in session_tokens:
             html = self._get_page(self._session, "")
             tokens = {}
             for name, pattern in [
@@ -640,8 +642,8 @@ class InstaloaderContext:
                     raise BadResponseException(
                         "The start page did not contain the token {}.".format(name)
                     )
-            self._web_api_tokens_cache[sessionid] = tokens
-        return self._web_api_tokens_cache[sessionid]
+            session_tokens[sessionid] = tokens
+        return session_tokens[sessionid]
 
     def graphql_query(self, query_hash: str, variables: Dict[str, Any],
                       referer: Optional[str] = None) -> Dict[str, Any]:

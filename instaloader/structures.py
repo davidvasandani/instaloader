@@ -201,7 +201,7 @@ class Post:
             self._iphone_struct_ = node['iphone_struct']
 
     @classmethod
-    def from_shortcode(cls, context: InstaloaderContext, shortcode: str):
+    def from_shortcode(cls, context: InstaloaderContext, shortcode: str, owner_profile: Optional['Profile'] = None):
         """Create a post object from a given shortcode"""
         # pylint:disable=protected-access
         post = cls(context, {'shortcode': shortcode})
@@ -210,6 +210,8 @@ class Post:
             post._node = post._full_metadata
         except PostChangedException:
             post._shortcode_changed = True
+        if owner_profile is not None and str(post.owner_id) == str(owner_profile.userid):
+            post._owner_profile = owner_profile
         return post
 
     @classmethod
@@ -1439,7 +1441,7 @@ class Profile:
                 context=self._context,
                 edge_extractor=lambda d: d["data"]["node"]["polaris_ordered_timeline_connection"],
                 # The nodes lack most of the post's metadata, as in get_reels().
-                node_wrapper=lambda n: Post.from_shortcode(self._context, n["code"]),
+                node_wrapper=lambda n: Post.from_shortcode(self._context, n["code"], owner_profile=self),
                 query_variables={
                     "id": user["id"],
                     "__relay_internal__pv__PolarisSEOIsCrawlerrelayprovider": False,
