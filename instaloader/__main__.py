@@ -17,7 +17,7 @@ from .instaloadercontext import default_user_agent
 from .lateststamps import LatestStamps
 from .structures import Hashtag
 try:
-    import browser_cookie3
+    import browser_cookie3  # type: ignore[import-untyped]
     bc3_library = True
 except ImportError:
     bc3_library = False
