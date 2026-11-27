@@ -999,6 +999,7 @@ class Profile:
         assert "id" in node or "pk" in node
         self._context = context
         self._has_public_story: Optional[bool] = None
+        self._public_profile_page: Optional[List[Dict[str, Any]]] = None
         self._node = node
         self._has_full_metadata = False
         self._iphone_struct_ = None
@@ -1039,7 +1040,10 @@ class Profile:
             # fields, notably the viewer's relationship to the profile, such as
             # followed_by_viewer, to the GraphQL profile query in _obtain_metadata().
             return cls(context, node)
-        return cls(context, cls._normalize_profile_data(node))
+        profile = cls(context, cls._normalize_profile_data(node))
+        # Retain the first posts page for the next public timeline iteration.
+        profile._public_profile_page = page  # pylint:disable=protected-access
+        return profile
 
     @classmethod
     def from_id(cls, context: InstaloaderContext, profile_id: int):
@@ -1070,7 +1074,11 @@ class Profile:
         except QueryReturnedNotFoundException:
             user = None
         if user and user.get('username'):
-            profile = cls(context, cls._normalize_profile_data(user))
+            node = cls._normalize_profile_data(user)
+            if (context.is_logged_in and 'followed_by_viewer' not in user
+                    and 'following' not in (user.get('friendship_status') or {})):
+                node.pop('followed_by_viewer', None)
+            profile = cls(context, node)
         else:
             raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
                                             str(profile_id) + ").")
@@ -1428,7 +1436,10 @@ class Profile:
             # As the logged-out web app, take the first posts from the profile page, and query further ones
             # (PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery_connection) by the page's "id" of the
             # profile, which is not its user ID.
-            page = self._context.get_page_data(f"{self.username}/")
+            page = self._public_profile_page
+            self._public_profile_page = None
+            if page is None:
+                page = self._context.get_page_data(f"{self.username}/")
             # The page shows no posts of a private profile, rather than an error.
             if any((data.get("xig_user_by_username") or {}).get("is_private") for data in page):
                 raise LoginRequiredException(f"Login required to access the posts of private profile {self.username}.")

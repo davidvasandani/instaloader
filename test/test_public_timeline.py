@@ -14,17 +14,19 @@ class PublicTimelineTests(unittest.TestCase):
         }
         second_page = {'edges': [{'node': {'code': 'kept'}}]}
         with closing(InstaloaderContext(sleep=False, quiet=True)) as context:
-            profile = Profile(context, {'username': 'example', 'id': '1'})
             missing = {'data': {'xdt_api__v1__media__shortcode__web_info': {'items': []}}}
             next_page = {'data': {'node': {'polaris_ordered_timeline_connection': second_page}}}
             media = {'media_type': 1, 'code': 'kept', 'pk': '123', 'taken_at': 1, 'user': {'pk': '1'}}
             available = {'data': {'xdt_api__v1__media__shortcode__web_info': {'items': [media]}}}
             with patch.object(context, 'get_page_data', return_value=[
-                {'xig_user_by_username': {'id': 'page-id', 'polaris_ordered_timeline_connection': first_page}}
-            ]), patch.object(context, 'doc_id_graphql_query', side_effect=[missing, next_page, available]) as query:
-                iterator = profile.get_posts()
+                {'xig_user_by_username': {'id': 'page-id', 'pk': '1', 'username': 'example',
+                                          'polaris_ordered_timeline_connection': first_page}}
+            ]) as get_page, patch.object(context, 'doc_id_graphql_query',
+                                         side_effect=[missing, next_page, available]) as query:
+                iterator = Profile.from_username(context, 'example').get_posts()
                 self.assertEqual([post.shortcode for post in iterator], ['kept'])
                 self.assertEqual(iterator.total_index, 1)
+                get_page.assert_called_once_with('example/')
                 self.assertEqual(query.call_args_list[1].args[1]['after'], 'next')
                 self.assertTrue(query.call_args_list[1].args[3])
 
