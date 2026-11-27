@@ -21,6 +21,8 @@ import requests.utils
 
 from .exceptions import *
 
+_GRAPHQL_PATHS = frozenset(("graphql/query", "api/graphql"))
+
 
 def copy_session(session: requests.Session, request_timeout: Optional[float] = None) -> requests.Session:
     """Duplicates a requests.Session."""
@@ -418,7 +420,7 @@ class InstaloaderContext:
     @staticmethod
     def _rate_limit_key(path: str, params: Dict[str, Any], host: str) -> str:
         """Determine the :class:`RateController` bucket that a request is accounted to."""
-        if 'graphql/query' in path or path == 'api/graphql':
+        if path.rstrip('/') in _GRAPHQL_PATHS:
             if 'query_hash' in params:
                 return params['query_hash']
             if 'doc_id' in params:
@@ -567,7 +569,7 @@ class InstaloaderContext:
                 self._raise_for_status(resp)
                 resp_json = resp.json()
                 # GraphQL can report throttling inside a successful HTTP response.
-                if path.rstrip('/') in ('graphql/query', 'api/graphql'):
+                if path.rstrip('/') in _GRAPHQL_PATHS:
                     errors = resp_json.get('errors')
                     if isinstance(errors, list) and any(
                             isinstance(error, dict) and error.get('code') == 1675004 for error in errors):

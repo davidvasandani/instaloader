@@ -9,7 +9,7 @@ from instaloader import ConnectionException, InstaloaderContext, Post, Profile
 class PublicTimelineTests(unittest.TestCase):
     def test_missing_post_does_not_prevent_pagination(self):
         first_page = {
-            'edges': [{'node': {'code': 'gone'}}],
+            'edges': [{'node': {'code': 'gone'}}, {'node': {'code': 'bad'}}],
             'page_info': {'has_next_page': True, 'end_cursor': 'next'},
         }
         second_page = {'edges': [{'node': {'code': 'kept'}}]}
@@ -22,13 +22,13 @@ class PublicTimelineTests(unittest.TestCase):
                 {'xig_user_by_username': {'id': 'page-id', 'pk': '1', 'username': 'example',
                                           'polaris_ordered_timeline_connection': first_page}}
             ]) as get_page, patch.object(context, 'doc_id_graphql_query',
-                                         side_effect=[missing, next_page, available]) as query:
+                                         side_effect=[missing, {'data': None}, next_page, available]) as query:
                 iterator = Profile.from_username(context, 'example').get_posts()
                 self.assertEqual([post.shortcode for post in iterator], ['kept'])
                 self.assertEqual(iterator.total_index, 1)
                 get_page.assert_called_once_with('example/')
-                self.assertEqual(query.call_args_list[1].args[1]['after'], 'next')
-                self.assertTrue(query.call_args_list[1].kwargs["web_api"])
+                self.assertEqual(query.call_args_list[2].args[1]['after'], 'next')
+                self.assertTrue(query.call_args_list[2].kwargs["web_api"])
 
     def test_throttle_stops_iteration(self):
         with closing(InstaloaderContext(sleep=False, quiet=True)) as context:

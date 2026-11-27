@@ -1456,9 +1456,17 @@ class Profile:
                     return Post.from_shortcode(self._context, node["code"], owner_profile=self)
                 return Post(self._context, node, owner_profile=self)
 
+            def extract_edges(response):
+                data = response.get("data")
+                node = data.get("node") if isinstance(data, dict) else None
+                timeline = node.get("polaris_ordered_timeline_connection") if isinstance(node, dict) else None
+                if not isinstance(timeline, dict) or not isinstance(timeline.get("edges"), list):
+                    raise BadResponseException(f"Fetching more posts for {self.username} failed.")
+                return timeline
+
             return NodeIterator(
                 context=self._context,
-                edge_extractor=lambda d: d["data"]["node"]["polaris_ordered_timeline_connection"],
+                edge_extractor=extract_edges,
                 node_wrapper=wrap_post,
                 query_variables={
                     "id": user["id"],
@@ -1470,7 +1478,7 @@ class Profile:
                 query_hash=None,
                 first_data=user["polaris_ordered_timeline_connection"],
                 web_api=True,
-                skip_missing=True,
+                skip_unavailable=True,
             )
         self._obtain_metadata()
         # Instagram answers with an empty timeline rather than an error in that case. Unlike followed_by_viewer,
