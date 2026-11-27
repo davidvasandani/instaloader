@@ -867,7 +867,7 @@ class InstaloaderContext:
                     if isinstance(err, TooManyRequestsException):
                         self._rate_controller.handle_429('other')
                 except KeyboardInterrupt:
-                    raise ConnectionException(error_string) from err
+                    raise TooManyRequestsException(error_string) from err
                 attempt += 1
 
     def get_page_data(self, path: str) -> List[Dict[str, Any]]:

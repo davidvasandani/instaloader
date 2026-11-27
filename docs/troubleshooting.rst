@@ -90,3 +90,13 @@ This script also supports specifying a cookie file path, which may be useful if
 you use multiple Firefox profiles or if your operating system has the directory
 structure differently set up. Also, you can specify an alternative session file
 path.
+
+Saved profile iterators after the 4.16 endpoint update
+------------------------------------------------------
+
+Profile iterators saved with the previous query document cannot be resumed
+against the 4.16 timeline endpoint. Keep the original iterator file and use
+the same media directory. The new iterator starts from the first page and
+skips existing media files. If a shortcode is still present in the timeline
+but cannot be loaded, the archive reports a partial result. A missing
+response does not establish that Instagram deleted the post.
