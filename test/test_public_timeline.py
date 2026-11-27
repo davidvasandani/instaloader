@@ -35,7 +35,7 @@ class PublicTimelineTests(unittest.TestCase):
             profile = Profile(context, {'username': 'example', 'id': '1'})
             page = {'edges': [{'node': {'code': 'post'}}]}
             with patch.object(context, 'get_page_data', return_value=[
-                {'xig_user_by_username': {'id': 'page-id', 'polaris_ordered_timeline_connection': page}}
+                {'xig_user_by_username': {'id': 'page-id', 'pk': '1', 'polaris_ordered_timeline_connection': page}}
             ]), patch.object(Post, 'from_shortcode', side_effect=ConnectionException('throttled')):
                 with self.assertRaisesRegex(ConnectionException, 'throttled'):
                     next(profile.get_posts())

@@ -1721,10 +1721,9 @@ class Instaloader:
         urls = []
         count = 0
 
+        if max_count is not None and max_count <= 0:
+            posts = iter(())
         for post in posts:
-            if max_count is not None and count >= max_count:
-                break
-
             if post_filter is not None:
                 try:
                     if not post_filter(post):
@@ -1737,6 +1736,8 @@ class Instaloader:
             urls.append(url)
             count += 1
             self.context.log(f"[{count}] {url}")
+            if max_count is not None and count >= max_count:
+                break
 
         # Write URLs to file
         with open(filename, 'w', encoding='utf-8') as f:

@@ -1439,6 +1439,9 @@ class Profile:
             self._public_profile_page = None
             if page is None:
                 page = self._context.get_page_data(f"{self.username}/")
+                page_ids = {(entry.get("xig_user_by_username") or {}).get("pk") for entry in page}
+                if {str(pk) for pk in page_ids if pk is not None} != {str(self.userid)}:
+                    raise BadResponseException(f"The page for {self.username} did not match the expected profile ID.")
             # The page shows no posts of a private profile, rather than an error.
             if any((data.get("xig_user_by_username") or {}).get("is_private") for data in page):
                 raise LoginRequiredException(f"Login required to access the posts of private profile {self.username}.")
