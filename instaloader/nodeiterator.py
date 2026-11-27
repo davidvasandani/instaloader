@@ -240,7 +240,7 @@ class NodeIterator(Iterator[T]):
     def freeze(self) -> FrozenNodeIterator:
         """Freeze the iterator for later resuming."""
         remaining_data = None
-        rewind = 0 if self._last_node_missing else 1
+        rewind = int(self._page_index > 0 and not self._last_node_missing)
         if self._data is not None:
             remaining_data = {**self._data,
                               'edges': (self._data['edges'][(max(self._page_index - rewind, 0)):])}

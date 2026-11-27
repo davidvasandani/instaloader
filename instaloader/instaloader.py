@@ -1092,7 +1092,7 @@ class Instaloader:
                     # obained after a redirect has probably already been downloaded as a previous Post of the
                     # same Profile.
                     # Observed in issue #225: https://github.com/instaloader/instaloader/issues/225
-                    post_changed = False
+                    post_changed = post._shortcode_changed  # pylint:disable=protected-access
                     while True:
                         try:
                             downloaded = self.download_post(post, target=target)

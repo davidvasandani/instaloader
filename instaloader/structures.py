@@ -192,6 +192,7 @@ class Post:
         self._context = context
         self._node = node
         self._owner_profile = owner_profile
+        self._shortcode_changed = False
         self._full_metadata_dict: Optional[Dict[str, Any]] = None
         self._location: Optional[PostLocation] = None
         self._iphone_struct_ = None
@@ -205,8 +206,10 @@ class Post:
         # pylint:disable=protected-access
         post = cls(context, {'shortcode': shortcode})
         # The metadata loader updates the node in place when a shortcode resolves to an alias.
-        with suppress(PostChangedException):
+        try:
             post._node = post._full_metadata
+        except PostChangedException:
+            post._shortcode_changed = True
         return post
 
     @classmethod
@@ -1261,6 +1264,8 @@ class Profile:
 
         .. versionchanged:: 4.16
            Returns None if unavailable (e.g. when not logged in)."""
+        if not self._context.is_logged_in:
+            return (self._node.get('edge_owner_to_timeline_media') or {}).get('count')
         with suppress(KeyError):
             return self._metadata('edge_owner_to_timeline_media', 'count')
         return None
