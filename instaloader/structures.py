@@ -442,7 +442,10 @@ class Post:
                 raise QueryReturnedNotFoundException(f"Post {self.shortcode} is unavailable.")
             if not items:
                 raise PostMetadataException("Fetching Post metadata failed.")
-            self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
+            try:
+                self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
+            except (IndexError, KeyError, TypeError) as err:
+                raise PostMetadataException(f"Malformed metadata for post {self.shortcode}.") from err
             if self.shortcode != self._full_metadata_dict['shortcode']:
                 self._node.update(self._full_metadata_dict)
                 raise PostChangedException

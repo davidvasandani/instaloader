@@ -350,12 +350,16 @@ def resumable_iteration(context: InstaloaderContext,
             context.log("Resuming from {}.".format(resume_file_path))
         except (InvalidArgumentException, LZMAError, json.decoder.JSONDecodeError, EOFError) as exc:
             context.error("Warning: Not resuming from {}: {}".format(resume_file_path, exc))
+    starting_checkpoint = iterator.freeze()
+    errors_before_iteration = len(context.error_log)
     try:
         yield is_resuming, start_index
     except (Exception, KeyboardInterrupt):
         if os.path.dirname(resume_file_path):
             os.makedirs(os.path.dirname(resume_file_path), exist_ok=True)
-        save(iterator.freeze(), resume_file_path)
+        # Revisit failed posts on resume so a later incremental run cannot skip them.
+        checkpoint = starting_checkpoint if len(context.error_log) > errors_before_iteration else iterator.freeze()
+        save(checkpoint, resume_file_path)
         context.log("\nSaved resume information to {}.".format(resume_file_path))
         raise
     if resume_file_exists:

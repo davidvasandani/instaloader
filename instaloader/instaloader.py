@@ -749,6 +749,9 @@ class Instaloader:
                         if '{filename}' in self.filename_pattern:
                             suffix = None
                         video_url = sidecar_node.video_url
+                        if (sidecar_node.is_video and self.download_videos and not video_url
+                                and (suffix is None or not os.path.isfile(f"{filename_template}_{suffix}.mp4"))):
+                            self.context.error(f"Video for slide {edge_number} of {post} is unavailable.")
                         if self.download_pictures and (video_url is None or self.download_video_thumbnails):
                             # pylint:disable=cell-var-from-loop
                             sidecar_filename = self.__prepare_filename(filename_template,
