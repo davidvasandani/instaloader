@@ -93,6 +93,7 @@ class NodeIterator(Iterator[T]):
         self._doc_id = doc_id
         self._web_api = web_api
         self._skip_missing = skip_missing
+        self._last_node_missing = False
         self._edge_extractor = edge_extractor
         self._node_wrapper = node_wrapper
         self._query_variables = query_variables if query_variables is not None else {}
@@ -153,6 +154,7 @@ class NodeIterator(Iterator[T]):
                 try:
                     self._page_index += 1
                     self._total_index += 1
+                    self._last_node_missing = False
                 except KeyboardInterrupt:
                     self._page_index, self._total_index = page_index, total_index
                     raise
@@ -161,6 +163,7 @@ class NodeIterator(Iterator[T]):
                 except QueryReturnedNotFoundException as err:
                     if self._skip_missing:
                         self._total_index -= 1
+                        self._last_node_missing = True
                         self._context.error(f"Skipping unavailable timeline item: {err}")
                         continue
                     raise
@@ -237,15 +240,16 @@ class NodeIterator(Iterator[T]):
     def freeze(self) -> FrozenNodeIterator:
         """Freeze the iterator for later resuming."""
         remaining_data = None
+        rewind = 0 if self._last_node_missing else 1
         if self._data is not None:
             remaining_data = {**self._data,
-                              'edges': (self._data['edges'][(max(self._page_index - 1, 0)):])}
+                              'edges': (self._data['edges'][(max(self._page_index - rewind, 0)):])}
         return FrozenNodeIterator(
             query_hash=self._query_hash,
             query_variables=self._query_variables,
             query_referer=self._query_referer,
             context_username=self._context.username,
-            total_index=max(self.total_index - 1, 0),
+            total_index=max(self.total_index - rewind, 0),
             best_before=self._best_before.timestamp() if self._best_before else None,
             remaining_data=remaining_data,
             first_node=self._first_node,

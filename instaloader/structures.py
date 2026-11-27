@@ -204,7 +204,9 @@ class Post:
         """Create a post object from a given shortcode"""
         # pylint:disable=protected-access
         post = cls(context, {'shortcode': shortcode})
-        post._node = post._full_metadata
+        # The metadata loader updates the node in place when a shortcode resolves to an alias.
+        with suppress(PostChangedException):
+            post._node = post._full_metadata
         return post
 
     @classmethod
