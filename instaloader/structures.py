@@ -454,7 +454,7 @@ class Post:
                 raise PostMetadataException("Fetching Post metadata failed.")
             try:
                 self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
-            except (IndexError, KeyError, TypeError) as err:
+            except (AttributeError, IndexError, KeyError, TypeError) as err:
                 raise PostMetadataException(f"Malformed metadata for post {self.shortcode}.") from err
             if self.shortcode != self._full_metadata_dict['shortcode']:
                 self._node.update(self._full_metadata_dict)
@@ -1482,13 +1482,18 @@ class Profile:
                     return Post.from_shortcode(self._context, node["code"], owner_profile=self)
                 return Post(self._context, node, owner_profile=self, lazy_metadata=True)
 
+            def validate_page(timeline):
+                if isinstance(timeline, dict) and isinstance(timeline.get("edges"), list):
+                    page_info = timeline.get("page_info")
+                    if isinstance(page_info, dict) and isinstance(page_info.get("has_next_page"), bool):
+                        return timeline
+                raise BadResponseException(f"Fetching a complete timeline page for {self.username} failed.")
+
             def extract_edges(response):
                 data = response.get("data")
                 node = data.get("node") if isinstance(data, dict) else None
                 timeline = node.get("polaris_ordered_timeline_connection") if isinstance(node, dict) else None
-                if not isinstance(timeline, dict) or not isinstance(timeline.get("edges"), list):
-                    raise BadResponseException(f"Fetching more posts for {self.username} failed.")
-                return timeline
+                return validate_page(None if response.get("errors") else timeline)
 
             return NodeIterator(
                 context=self._context,
@@ -1502,7 +1507,7 @@ class Profile:
                 is_first=Profile._make_is_newest_checker() if metadata else None,
                 doc_id="28904005159232689",
                 query_hash=None,
-                first_data=user["polaris_ordered_timeline_connection"],
+                first_data=validate_page(user["polaris_ordered_timeline_connection"]),
                 web_api=True,
                 skip_unavailable=True,
             )

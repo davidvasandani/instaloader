@@ -12,7 +12,7 @@ class PublicTimelineTests(unittest.TestCase):
             'edges': [{'node': {'code': 'gone'}}, {'node': {'code': 'bad'}}],
             'page_info': {'has_next_page': True, 'end_cursor': 'next'},
         }
-        second_page = {'edges': [{'node': {'code': 'kept'}}]}
+        second_page = {'edges': [{'node': {'code': 'kept'}}], 'page_info': {'has_next_page': False}}
         with closing(InstaloaderContext(sleep=False, quiet=True)) as context:
             missing = {'data': {'xdt_api__v1__media__shortcode__web_info': {'items': []}}}
             next_page = {'data': {'node': {'polaris_ordered_timeline_connection': second_page}}}
@@ -34,7 +34,7 @@ class PublicTimelineTests(unittest.TestCase):
     def test_throttle_stops_iteration(self):
         with closing(InstaloaderContext(sleep=False, quiet=True)) as context:
             profile = Profile(context, {'username': 'example', 'id': '1'})
-            page = {'edges': [{'node': {'code': 'post'}}]}
+            page = {'edges': [{'node': {'code': 'post'}}], 'page_info': {'has_next_page': False}}
             with patch.object(context, 'get_page_data', return_value=[
                 {'xig_user_by_username': {'id': 'page-id', 'pk': '1', 'polaris_ordered_timeline_connection': page}}
             ]), patch.object(Post, 'from_shortcode', side_effect=ConnectionException('throttled')):
