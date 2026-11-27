@@ -499,13 +499,9 @@ class Post:
     def owner_profile(self) -> 'Profile':
         """:class:`Profile` instance of the Post's owner."""
         if not self._owner_profile:
-            if 'username' in self._node['owner']:
-                owner_struct = self._node['owner']
-            else:
-                # Sometimes, the 'owner' structure does not contain the username, only the user's ID.  In that case,
-                # this call triggers downloading of the complete Post metadata struct, where the owner username
-                # is contained.
-                # Note that we cannot use Profile.from_id() here since that would lead us into a recursion.
+            owner_struct = self._node.get('owner') or {}
+            if 'username' not in owner_struct:
+                # Sparse nodes need the shortcode metadata to identify the actual author.
                 owner_struct = self._full_metadata['owner']
             self._owner_profile = Profile(self._context, owner_struct)
         return self._owner_profile
@@ -1480,7 +1476,7 @@ class Profile:
                     raise PostMetadataException("Public timeline entry omitted its shortcode.")
                 if metadata:
                     return Post.from_shortcode(self._context, node["code"], owner_profile=self)
-                return Post(self._context, node, owner_profile=self, lazy_metadata=True)
+                return Post(self._context, node, lazy_metadata=True)
 
             def validate_page(timeline):
                 if isinstance(timeline, dict) and isinstance(timeline.get("edges"), list):
