@@ -1044,7 +1044,7 @@ class Profile:
         if profile_id in context.profile_id_cache:
             return context.profile_id_cache[profile_id]
         try:
-            user = context.doc_id_graphql_query(
+            response = context.doc_id_graphql_query(
                 '27937681195819736',
                 {
                     "id": str(profile_id),
@@ -1056,7 +1056,8 @@ class Profile:
                     "enable_integrity_filters": True,
                 },
                 web_api=True,
-            ).get('data', {}).get('user')
+            )
+            user = (response.get('data') or {}).get('user')
         except QueryReturnedNotFoundException:
             user = None
         if user and user.get('username'):
