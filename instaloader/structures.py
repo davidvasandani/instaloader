@@ -431,6 +431,8 @@ class Post:
             )
             web_info = (resp.get("data") or {}).get("xdt_api__v1__media__shortcode__web_info") or {}
             items = web_info.get("items")
+            if items == [] and not resp.get("errors"):
+                raise QueryReturnedNotFoundException(f"Post {self.shortcode} is unavailable.")
             if not items:
                 raise BadResponseException("Fetching Post metadata failed.")
             self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)

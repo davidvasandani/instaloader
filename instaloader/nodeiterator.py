@@ -153,14 +153,16 @@ class NodeIterator(Iterator[T]):
                 try:
                     self._page_index += 1
                     self._total_index += 1
+                except KeyboardInterrupt:
+                    self._page_index, self._total_index = page_index, total_index
+                    raise
+                try:
                     item = self._node_wrapper(node)
                 except QueryReturnedNotFoundException as err:
                     if self._skip_missing:
+                        self._total_index -= 1
                         self._context.error(f"Skipping unavailable timeline item: {err}")
                         continue
-                    raise
-                except KeyboardInterrupt:
-                    self._page_index, self._total_index = page_index, total_index
                     raise
                 if self._is_first is not None:
                     if self._is_first(item, self.first_item):
