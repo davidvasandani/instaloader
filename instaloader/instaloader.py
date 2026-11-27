@@ -8,10 +8,10 @@ import string
 import sys
 import tempfile
 from contextlib import contextmanager, suppress
-from itertools import islice
 from datetime import datetime, timezone
 from functools import wraps
 from io import BytesIO
+from itertools import islice
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Set, Union, cast
 from urllib.parse import urlparse
@@ -1092,6 +1092,8 @@ class Instaloader:
                         if not post_filter(post):
                             self.context.log("{} skipped".format(post))
                             continue
+                    except TooManyRequestsException:
+                        raise
                     except (InstaloaderException, KeyError, TypeError) as err:
                         self.context.error("{} skipped. Filter evaluation failed: {}".format(post, err))
                         continue
@@ -1743,6 +1745,8 @@ class Instaloader:
                 try:
                     if not post_filter(post):
                         continue
+                except TooManyRequestsException:
+                    raise
                 except (InstaloaderException, KeyError, TypeError) as err:
                     self.context.error("Post skipped. Filter evaluation failed: {}".format(err))
                     continue

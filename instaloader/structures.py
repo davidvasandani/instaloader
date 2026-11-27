@@ -453,7 +453,12 @@ class Post:
 
     @property
     def _full_metadata(self) -> Dict[str, Any]:
-        self._obtain_metadata()
+        try:
+            self._obtain_metadata()
+        except PostChangedException:
+            if not self._lazy_metadata:
+                raise
+            self._shortcode_changed = True
         assert self._full_metadata_dict is not None
         return self._full_metadata_dict
 

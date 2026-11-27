@@ -580,8 +580,8 @@ class InstaloaderContext:
             except (ConnectionException, json.decoder.JSONDecodeError, requests.exceptions.RequestException) as err:
                 error_string = "JSON Query to {}: {}".format(path, err)
                 if attempt == self.max_connection_attempts:
-                    if isinstance(err, QueryReturnedNotFoundException):
-                        raise QueryReturnedNotFoundException(error_string) from err
+                    if isinstance(err, (QueryReturnedNotFoundException, TooManyRequestsException)):
+                        raise type(err)(error_string) from err
                     raise ConnectionException(error_string) from err
                 self.error(error_string + " [retrying; skip with ^C]", repeat_at_end=False)
                 pending_error, pending_error_string = err, error_string
@@ -589,6 +589,8 @@ class InstaloaderContext:
                 if pending_error is None:
                     raise
                 self.error("[skipped by user]", repeat_at_end=False)
+                if isinstance(pending_error, TooManyRequestsException):
+                    raise TooManyRequestsException(pending_error_string) from pending_error
                 raise ConnectionException(pending_error_string) from pending_error
 
 
@@ -857,8 +859,8 @@ class InstaloaderContext:
             except (ConnectionException, requests.exceptions.RequestException) as err:
                 error_string = "Page request to {}: {}".format(url, err)
                 if attempt == self.max_connection_attempts:
-                    if isinstance(err, QueryReturnedNotFoundException):
-                        raise QueryReturnedNotFoundException(error_string) from err
+                    if isinstance(err, (QueryReturnedNotFoundException, TooManyRequestsException)):
+                        raise type(err)(error_string) from err
                     raise ConnectionException(error_string) from err
                 self.error(error_string + " [retrying; skip with ^C]", repeat_at_end=False)
                 try:
