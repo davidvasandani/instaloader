@@ -165,8 +165,7 @@ class NodeIterator(Iterator[T]):
                     if self._skip_unavailable:
                         self._total_index -= 1
                         self._last_node_missing = True
-                        self._context.error(f"Skipping unavailable timeline item: {err}",
-                                            repeat_at_end=isinstance(err, PostMetadataException))
+                        self._context.error(f"Skipping unavailable timeline item: {err}")
                         continue
                     raise
                 if self._is_first is not None:
@@ -231,8 +230,7 @@ class NodeIterator(Iterator[T]):
                 except (PostMetadataException, QueryReturnedNotFoundException) as err:
                     if not self._skip_unavailable:
                         raise
-                    self._context.error(f"Skipping unavailable saved timeline item: {err}",
-                                        repeat_at_end=isinstance(err, PostMetadataException))
+                    self._context.error(f"Skipping unavailable saved timeline item: {err}")
                     self._first_node = None
         return self._first_item
 

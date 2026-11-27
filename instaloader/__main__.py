@@ -315,7 +315,7 @@ def _main(instaloader: Instaloader, targetlist: List[str],
         if list_only and profiles:
             # List URLs for each profile
             for profile in profiles:
-                instaloader.list_posts_to_file(profile.get_posts(metadata=post_filter is not None), profile.username,
+                instaloader.list_posts_to_file(profile.get_posts(metadata=False), profile.username,
                                               max_count=max_count, post_filter=post_filter)
         else:
             instaloader.download_profiles(

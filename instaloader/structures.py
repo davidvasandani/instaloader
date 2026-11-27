@@ -186,13 +186,14 @@ class Post:
     """
 
     def __init__(self, context: InstaloaderContext, node: Dict[str, Any],
-                 owner_profile: Optional['Profile'] = None):
+                 owner_profile: Optional['Profile'] = None, *, lazy_metadata: bool = False):
         assert 'shortcode' in node or 'code' in node
 
         self._context = context
         self._node = node
         self._owner_profile = owner_profile
         self._shortcode_changed = False
+        self._lazy_metadata = lazy_metadata
         self._full_metadata_dict: Optional[Dict[str, Any]] = None
         self._location: Optional[PostLocation] = None
         self._iphone_struct_ = None
@@ -404,7 +405,7 @@ class Post:
     @property
     def mediaid(self) -> int:
         """The mediaid is a decimal representation of the media shortcode."""
-        return int(self._node['id'])
+        return int(self._field('id'))
 
     @property
     def title(self) -> Optional[str]:
@@ -544,7 +545,9 @@ class Post:
                 return url
             except (InstaloaderException, KeyError, IndexError) as err:
                 self._context.error(f"Unable to fetch high quality image version of {self}: {err}")
-        return self._node["display_url"] if "display_url" in self._node else self._node["display_src"]
+        if "display_url" not in self._node and "display_src" in self._node:
+            return self._node["display_src"]
+        return self._field("display_url")
 
     @property
     def typename(self) -> str:
@@ -567,7 +570,7 @@ class Post:
         """Timestamp when the post was created"""
         return (self._node["date"]
                 if "date" in self._node
-                else self._node["taken_at_timestamp"])
+                else self._field("taken_at_timestamp"))
 
     def get_is_videos(self) -> List[bool]:
         """
@@ -624,6 +627,8 @@ class Post:
             return _optional_normalize(self._node["edge_media_to_caption"]["edges"][0]["node"]["text"])
         elif "caption" in self._node:
             return _optional_normalize(self._node["caption"])
+        if self._lazy_metadata and "edge_media_to_caption" not in self._node:
+            return _optional_normalize(self._full_metadata.get("caption"))
         return None
 
     @property
@@ -672,7 +677,7 @@ class Post:
     @property
     def is_video(self) -> bool:
         """True if the Post is a video."""
-        return self._node['is_video']
+        return self._field('is_video')
 
     @property
     def video_url(self) -> Optional[str]:
@@ -1457,7 +1462,7 @@ class Profile:
             def wrap_post(node):
                 if metadata:
                     return Post.from_shortcode(self._context, node["code"], owner_profile=self)
-                return Post(self._context, node, owner_profile=self)
+                return Post(self._context, node, owner_profile=self, lazy_metadata=True)
 
             def extract_edges(response):
                 data = response.get("data")

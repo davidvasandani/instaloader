@@ -341,12 +341,15 @@ class Instaloader:
         return f"<Instaloader context={self.context}>"
 
     @_retry_on_connection_error
-    def download_pic(self, filename: str, url: str, mtime: datetime,
+    def download_pic(self, filename: str, url: Optional[str], mtime: datetime,
                      filename_suffix: Optional[str] = None) -> bool:
         """Downloads and saves picture with given url under given directory with given timestamp.
         Returns true, if file was actually downloaded, i.e. updated."""
         if filename_suffix is not None:
             filename += '_' + filename_suffix
+        if not url:
+            self.context.error(f"No media URL available for {filename}.")
+            return False
         urlmatch = re.search('\\.[a-z0-9]*\\?', url)
         file_extension = url[-3:] if urlmatch is None else urlmatch.group(0)[1:-1]
         nominal_filename = filename + '.' + file_extension
@@ -677,13 +680,16 @@ class Instaloader:
         self.context.two_factor_login(two_factor_code)
 
     @staticmethod
-    def __prepare_filename(filename_template: str, url: Callable[[], str]) -> str:
+    def __prepare_filename(filename_template: str, url: Callable[[], Optional[str]]) -> str:
         """Replace filename token inside filename_template with url's filename and assure the directories exist.
 
         .. versionadded:: 4.6"""
         if "{filename}" in filename_template:
+            media_url = url()
+            if not media_url:
+                raise BadResponseException("No media URL available to resolve the filename.")
             filename = filename_template.replace("{filename}",
-                                                 os.path.splitext(os.path.basename(urlparse(url()).path))[0])
+                                                 os.path.splitext(os.path.basename(urlparse(media_url).path))[0])
         else:
             filename = filename_template
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -1089,6 +1095,7 @@ class Instaloader:
                     except (InstaloaderException, KeyError, TypeError) as err:
                         self.context.error("{} skipped. Filter evaluation failed: {}".format(post, err))
                         continue
+                errors_before_post = len(self.context.error_log)
                 with self.context.error_catcher("Download {} of {}".format(post, target)):
                     # The PostChangedException gets raised if the Post's id/shortcode changed while obtaining
                     # additional metadata. This is most likely the case if a HTTP redirect takes place while
@@ -1106,8 +1113,9 @@ class Instaloader:
                             post_changed = True
                             continue
                     # A resume can replay existing files before reaching the interrupted or failed item.
-                    if (fast_update and not is_resuming and not downloaded and not post_changed
-                            and number > possibly_pinned):
+                    files_already_present = not (downloaded or post_changed
+                                                 or len(self.context.error_log) != errors_before_post)
+                    if fast_update and not is_resuming and files_already_present and number > possibly_pinned:
                         break
 
     @_requires_login
