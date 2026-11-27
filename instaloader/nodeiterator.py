@@ -244,7 +244,7 @@ class NodeIterator(Iterator[T]):
                 except (PostMetadataException, QueryReturnedNotFoundException) as err:
                     if not self._skip_unavailable:
                         raise
-                    self._context.error(f"Skipping unavailable saved timeline item: {err}")
+                    self._context.error(f"Saved timestamp reference is unavailable: {err}", repeat_at_end=False)
                     self._first_node = None
         return self._first_item
 

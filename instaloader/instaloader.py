@@ -739,6 +739,8 @@ class Instaloader:
         # Download the image(s) / video thumbnail and videos within sidecars if desired
         downloaded = True
         if post.typename == 'GraphSidecar':
+            if (self.download_pictures or self.download_videos) and post.mediacount == 0:
+                self.context.error(f"No media found for carousel {post}.")
             if (self.download_pictures or self.download_videos) and post.mediacount > 0:
                 if not _all_already_downloaded(
                         filename_template, enumerate(

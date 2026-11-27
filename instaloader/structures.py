@@ -450,7 +450,7 @@ class Post:
             items = web_info.get("items")
             if items == [] and not resp.get("errors"):
                 raise QueryReturnedNotFoundException(f"Post {self.shortcode} is unavailable.")
-            if not items:
+            if not isinstance(items, list) or not items or not isinstance(items[0], dict):
                 raise PostMetadataException("Fetching Post metadata failed.")
             try:
                 self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
