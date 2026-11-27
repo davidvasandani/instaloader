@@ -318,7 +318,7 @@ class Post:
         pic_json["video_duration"] = media.get("video_duration")
         pic_json["video_view_count"] = media.get("view_count")
         pic_json["video_play_count"] = media.get("play_count")
-        if (media_type == 2 and pic_json["video_view_count"] is None
+        if (context.is_logged_in and media_type == 2 and pic_json["video_view_count"] is None
                 and pic_json["video_play_count"] is None):
             pic_json["video_play_count"] = Post._fetch_play_count_from_clips(
                 context, media["user"]["pk"], media["code"]

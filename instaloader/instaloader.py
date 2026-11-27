@@ -1105,10 +1105,10 @@ class Instaloader:
                         except PostChangedException:
                             post_changed = True
                             continue
-                    if fast_update and not downloaded and not post_changed and number > possibly_pinned:
-                        # disengage fast_update for first post when resuming
-                        if not is_resuming or number > 0:
-                            break
+                    # A resume can replay existing files before reaching the interrupted or failed item.
+                    if (fast_update and not is_resuming and not downloaded and not post_changed
+                            and number > possibly_pinned):
+                        break
 
     @_requires_login
     def get_feed_posts(self) -> Iterator[Post]:
