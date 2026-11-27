@@ -98,7 +98,9 @@ def _retry_on_connection_error(func: Callable) -> Callable:
         # The failure we are currently retrying, if any. It tells us whether a ^C means "skip this
         # download" rather than "abort everything", and whether to sleep before the next attempt.
         pending_error_string: Optional[str] = None
-        for attempt in range(1, instaloader.context.max_connection_attempts + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 if pending_error_string is not None:
                     instaloader.context.do_sleep()
@@ -114,7 +116,6 @@ def _retry_on_connection_error(func: Callable) -> Callable:
                     raise
                 instaloader.context.error("[skipped by user]", repeat_at_end=False)
                 raise ConnectionException(pending_error_string) from None
-        raise AssertionError("_retry_on_connection_error() retry loop exited without result")
     return call
 
 

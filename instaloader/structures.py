@@ -712,11 +712,7 @@ class Post:
 
         .. versionadded:: 4.14.3"""
         if self.is_video:
-            play_count = self._field('video_play_count')
-            # Not logged in, the clips connection is null.
-            if play_count is None and self.video_view_count is None and self._context.is_logged_in:
-                play_count = Post._fetch_play_count_from_clips(self._context, str(self.owner_id), self.shortcode)
-            return play_count
+            return self._field('video_play_count')
         return None
 
     @property
@@ -1260,7 +1256,9 @@ class Profile:
 
         .. versionchanged:: 4.16
            Returns None if unavailable (e.g. when not logged in)."""
-        return self._metadata('edge_owner_to_timeline_media', 'count')
+        with suppress(KeyError):
+            return self._metadata('edge_owner_to_timeline_media', 'count')
+        return None
 
     @property
     def igtvcount(self) -> int:

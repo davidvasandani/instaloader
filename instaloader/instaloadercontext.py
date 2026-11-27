@@ -437,7 +437,7 @@ class InstaloaderContext:
             host, path, resp.status_code, resp.reason, redirect, body
         ))
 
-    def _raise_if_login_redirect(self, resp: requests.Response) -> None:
+    def _raise_if_login_redirect(self, resp: requests.Response, *, anonymous: bool = False) -> None:
         """Turn a redirect to the login page into a meaningful exception.
 
         Instagram answers requests it will not serve anonymously with a redirect to the login page
@@ -450,7 +450,7 @@ class InstaloaderContext:
         if not (redirect_url.startswith('https://www.instagram.com/accounts/login') or
                 redirect_url.startswith('https://i.instagram.com/accounts/login')):
             return
-        if not self.is_logged_in:
+        if anonymous or not self.is_logged_in:
             raise LoginRequiredException("Redirected to login page. Use --login or --load-cookies.")
         raise AbortDownloadException("Redirected to login page. You've been logged out, please wait " +
                                      "some time, recreate the session and try again")
@@ -542,7 +542,9 @@ class InstaloaderContext:
         pending_error: Optional[BaseException] = None
         pending_error_string = ""
 
-        for attempt in range(1, self.max_connection_attempts + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 if isinstance(pending_error, TooManyRequestsException):
                     self._rate_controller.handle_429(rate_limit_key)
@@ -586,7 +588,6 @@ class InstaloaderContext:
                 self.error("[skipped by user]", repeat_at_end=False)
                 raise ConnectionException(pending_error_string) from pending_error
 
-        raise AssertionError("get_json() retry loop exited without result")
 
     @contextmanager
     def _graphql_session(self, referer: Optional[str], csrf: Optional[str] = None,
@@ -836,7 +837,7 @@ class InstaloaderContext:
                 resp = session.get(url, headers=headers, timeout=self.request_timeout, allow_redirects=False)
                 if resp.status_code in self.fatal_status_codes:
                     raise AbortDownloadException(self._response_error(resp))
-                self._raise_if_login_redirect(resp)
+                self._raise_if_login_redirect(resp, anonymous=session is not self._session)
                 if resp.status_code == 404:
                     raise QueryReturnedNotFoundException(self._response_error(resp))
                 if resp.status_code == 429:
